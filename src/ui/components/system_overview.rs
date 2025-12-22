@@ -206,7 +206,7 @@ fn render_cpu_core(frame: &mut Frame, area: Rect, core: &crate::collectors::Core
     }
 }
 
-fn render_memory_stats(frame: &mut Frame, area: Rect, mem_stats: &MemoryStats, memory_history: &VecDeque<f64>) {
+fn render_memory_stats(frame: &mut Frame, area: Rect, mem_stats: &MemoryStats, _memory_history: &VecDeque<f64>) {
     let block = Block::default()
         .title(" Memory ")
         .borders(Borders::ALL)
@@ -215,63 +215,110 @@ fn render_memory_stats(frame: &mut Frame, area: Rect, mem_stats: &MemoryStats, m
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    // Format memory sizes
-    let total_gb = mem_stats.total_bytes as f64 / 1024.0 / 1024.0 / 1024.0;
-    let used_gb = (mem_stats.total_bytes - mem_stats.free_bytes) as f64 / 1024.0 / 1024.0 / 1024.0;
+    let total = mem_stats.total_bytes as f64;
+    if total == 0.0 {
+        return;
+    }
 
-    // Create gauge for memory usage
-    let gauge_area = Rect {
+    // Calculate memory segments (ARC is part of wired, so subtract it)
+    let wired_non_arc = mem_stats.wired_bytes.saturating_sub(mem_stats.arc_total_bytes);
+    let arc = mem_stats.arc_total_bytes;
+    let active = mem_stats.active_bytes;
+    let inactive = mem_stats.inactive_bytes;
+    let laundry = mem_stats.laundry_bytes;
+    let free = mem_stats.free_bytes;
+
+    // Calculate percentages
+    let wired_pct = (wired_non_arc as f64 / total * 100.0) as u16;
+    let arc_pct = (arc as f64 / total * 100.0) as u16;
+    let active_pct = (active as f64 / total * 100.0) as u16;
+    let inactive_pct = (inactive as f64 / total * 100.0) as u16;
+    let _laundry_pct = (laundry as f64 / total * 100.0) as u16;
+    let _free_pct = (free as f64 / total * 100.0) as u16;
+
+    // Format helper
+    fn fmt_gb(bytes: u64) -> String {
+        let gb = bytes as f64 / 1024.0 / 1024.0 / 1024.0;
+        if gb >= 10.0 {
+            format!("{:.0}G", gb)
+        } else {
+            format!("{:.1}G", gb)
+        }
+    }
+
+    // Row 1: Stacked bar visualization
+    let bar_area = Rect {
         x: inner.x,
         y: inner.y,
         width: inner.width,
         height: 1,
     };
 
-    let gauge_color = if mem_stats.used_pct > 90.0 {
-        Color::Red
-    } else if mem_stats.used_pct > 75.0 {
-        Color::Yellow
-    } else {
-        Color::Green
-    };
+    // Build the stacked bar as colored characters
+    let bar_width = bar_area.width as usize;
+    let mut bar_spans: Vec<Span> = Vec::new();
 
-    let gauge = Gauge::default()
-        .gauge_style(Style::default().fg(gauge_color))
-        .percent(mem_stats.used_pct as u16)
-        .label(format!("{:.1}/{:.1} GB ({:.0}%)", used_gb, total_gb, mem_stats.used_pct));
+    // Calculate character widths for each segment
+    let wired_chars = (wired_pct as usize * bar_width / 100).max(if wired_non_arc > 0 { 1 } else { 0 });
+    let arc_chars = (arc_pct as usize * bar_width / 100).max(if arc > 0 { 1 } else { 0 });
+    let active_chars = (active_pct as usize * bar_width / 100).max(if active > 0 { 1 } else { 0 });
+    let inactive_chars = (inactive_pct as usize * bar_width / 100).max(if inactive > 0 { 1 } else { 0 });
 
-    frame.render_widget(gauge, gauge_area);
+    // Fill remaining with free
+    let used_chars = wired_chars + arc_chars + active_chars + inactive_chars;
+    let free_chars = bar_width.saturating_sub(used_chars);
 
-    // Memory history sparkline
-    if !memory_history.is_empty() && inner.height > 2 {
-        let sparkline_area = Rect {
+    // Add segments with block characters
+    if wired_chars > 0 {
+        bar_spans.push(Span::styled("█".repeat(wired_chars), Style::default().fg(Color::Red)));
+    }
+    if arc_chars > 0 {
+        bar_spans.push(Span::styled("█".repeat(arc_chars), Style::default().fg(Color::Blue)));
+    }
+    if active_chars > 0 {
+        bar_spans.push(Span::styled("█".repeat(active_chars), Style::default().fg(Color::Green)));
+    }
+    if inactive_chars > 0 {
+        bar_spans.push(Span::styled("█".repeat(inactive_chars), Style::default().fg(Color::Yellow)));
+    }
+    if free_chars > 0 {
+        bar_spans.push(Span::styled("░".repeat(free_chars), Style::default().fg(Color::DarkGray)));
+    }
+
+    frame.render_widget(Paragraph::new(Line::from(bar_spans)), bar_area);
+
+    // Row 2: Legend with values
+    if inner.height > 1 {
+        let legend_area = Rect {
             x: inner.x,
             y: inner.y + 1,
             width: inner.width,
             height: 1,
         };
 
-        // Sliding window: take last N points that fit the width
-        let width = sparkline_area.width as usize;
-        let start = if memory_history.len() > width {
-            memory_history.len() - width
-        } else {
-            0
-        };
-        let data: Vec<u64> = memory_history.iter().skip(start).map(|&v| v as u64).collect();
-        let sparkline = Sparkline::default()
-            .data(&data)
-            .style(Style::default().fg(Color::Cyan))
-            .bar_set(ratatui::symbols::bar::NINE_LEVELS);
-        frame.render_widget(sparkline, sparkline_area);
+        let total_gb = mem_stats.total_bytes as f64 / 1024.0 / 1024.0 / 1024.0;
+        let legend = Line::from(vec![
+            Span::styled("█", Style::default().fg(Color::Red)),
+            Span::styled(format!("W:{} ", fmt_gb(wired_non_arc)), Style::default().fg(Color::DarkGray)),
+            Span::styled("█", Style::default().fg(Color::Blue)),
+            Span::styled(format!("ARC:{} ", fmt_gb(arc)), Style::default().fg(Color::DarkGray)),
+            Span::styled("█", Style::default().fg(Color::Green)),
+            Span::styled(format!("A:{} ", fmt_gb(active)), Style::default().fg(Color::DarkGray)),
+            Span::styled("█", Style::default().fg(Color::Yellow)),
+            Span::styled(format!("I:{} ", fmt_gb(inactive)), Style::default().fg(Color::DarkGray)),
+            Span::styled("░", Style::default().fg(Color::DarkGray)),
+            Span::styled(format!("F:{} ", fmt_gb(free)), Style::default().fg(Color::DarkGray)),
+            Span::styled(format!("/{:.0}G", total_gb), Style::default().fg(Color::White)),
+        ]);
+
+        frame.render_widget(Paragraph::new(legend), legend_area);
     }
 
-    // Swap info if present
+    // Row 3: Swap info if present
     if mem_stats.swap_total_bytes > 0 && inner.height > 2 {
-        let y_offset = if !memory_history.is_empty() { 2 } else { 1 };
         let swap_area = Rect {
             x: inner.x,
-            y: inner.y + y_offset,
+            y: inner.y + 2,
             width: inner.width,
             height: 1,
         };
@@ -279,15 +326,14 @@ fn render_memory_stats(frame: &mut Frame, area: Rect, mem_stats: &MemoryStats, m
         let swap_gb = mem_stats.swap_total_bytes as f64 / 1024.0 / 1024.0 / 1024.0;
         let swap_used_gb = mem_stats.swap_used_bytes as f64 / 1024.0 / 1024.0 / 1024.0;
 
-        let swap_text = format!("Swap: {:.1}/{:.1} GB ({:.0}%)", swap_used_gb, swap_gb, mem_stats.swap_used_pct);
-        let swap_para = Paragraph::new(swap_text)
-            .style(Style::default().fg(if mem_stats.swap_used_pct > 50.0 {
-                Color::Yellow
-            } else {
-                Color::DarkGray
-            }));
+        let swap_color = if mem_stats.swap_used_pct > 50.0 {
+            Color::Yellow
+        } else {
+            Color::DarkGray
+        };
 
-        frame.render_widget(swap_para, swap_area);
+        let swap_text = format!("Swap: {:.1}/{:.1}G ({:.0}%)", swap_used_gb, swap_gb, mem_stats.swap_used_pct);
+        frame.render_widget(Paragraph::new(swap_text).style(Style::default().fg(swap_color)), swap_area);
     }
 }
 

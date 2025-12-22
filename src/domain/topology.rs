@@ -1,11 +1,23 @@
 use crate::collectors::multipath::MultipathInfo;
 use crate::collectors::ses::SesSlotInfo;
 use crate::collectors::ZfsDriveInfo;
-use crate::domain::device::{DiskStatistics, MultipathDevice, PhysicalDisk};
+use crate::domain::device::{DiskStatistics, MultipathDevice, PathStats, PhysicalDisk};
 use log::debug;
 use std::collections::HashMap;
 
 pub struct TopologyCorrelator;
+
+/// Determine controller number from SES enclosure name
+/// ses0 = Controller A (0), ses1 = Controller B (1), etc.
+fn controller_from_enclosure(enclosure: &str) -> u8 {
+    if let Some(num_str) = enclosure.strip_prefix("ses") {
+        if let Ok(num) = num_str.parse::<u8>() {
+            // Map ses0 -> 0, ses1 -> 1, ses2 -> 0, ses3 -> 1, etc.
+            return num % 2;
+        }
+    }
+    0 // Default to controller 0 if unknown
+}
 
 impl TopologyCorrelator {
     pub fn new() -> Self {
@@ -46,6 +58,7 @@ impl TopologyCorrelator {
         for (mp_name, mp_info) in multipath_info {
             let mut path_disks = Vec::new();
             let mut active_path = None;
+            let mut path_stats_list = Vec::new();
 
             // Collect disks for each path
             for path_info in &mp_info.paths {
@@ -53,12 +66,31 @@ impl TopologyCorrelator {
                     if path_info.is_active {
                         active_path = Some(path_info.device_name.clone());
                     }
+
+                    // Determine controller from SES enclosure
+                    let controller = ses_info
+                        .get(&path_info.device_name)
+                        .map(|s| controller_from_enclosure(&s.enclosure))
+                        .unwrap_or(0);
+
+                    // Build per-path stats for controller activity LEDs
+                    path_stats_list.push(PathStats {
+                        device_name: path_info.device_name.clone(),
+                        controller,
+                        is_active: path_info.is_active,
+                        statistics: disk.statistics.clone(),
+                    });
+
                     path_disks.push(disk);
                 }
             }
 
-            // Use statistics from the active path, or first available, or default
-            let stats = if path_disks.is_empty() {
+            // Use statistics from the multipath device itself if available in disk_map,
+            // otherwise use active path stats, or first available, or default
+            let stats = if let Some(mp_disk) = disk_map.remove(&mp_name) {
+                // Prefer multipath device stats (aggregated by GEOM)
+                mp_disk.statistics
+            } else if path_disks.is_empty() {
                 debug!("Multipath device {} has no associated physical disks in GEOM snapshot", mp_name);
                 DiskStatistics::default()
             } else if let Some(ref active) = active_path {
@@ -114,6 +146,7 @@ impl TopologyCorrelator {
                 paths,
                 active_path,
                 statistics: stats,
+                path_stats: path_stats_list,
                 zfs_info: zfs,
                 slot,
             });

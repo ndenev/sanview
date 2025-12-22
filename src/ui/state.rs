@@ -28,10 +28,14 @@ pub struct AppState {
     pub arc_ratio_history: VecDeque<f64>,  // Compression ratio
 
     // Storage aggregate history (from multipath devices only - no double counting)
-    pub storage_iops_history: VecDeque<f64>,     // Total IOPS
-    pub storage_read_bw_history: VecDeque<f64>,  // Read MB/s
-    pub storage_write_bw_history: VecDeque<f64>, // Write MB/s
-    pub storage_busy_history: VecDeque<f64>,     // Avg busy %
+    pub storage_read_iops_history: VecDeque<f64>,   // Read IOPS
+    pub storage_write_iops_history: VecDeque<f64>,  // Write IOPS
+    pub storage_read_bw_history: VecDeque<f64>,     // Read MB/s
+    pub storage_write_bw_history: VecDeque<f64>,    // Write MB/s
+    pub storage_read_latency_history: VecDeque<f64>,  // Read latency ms
+    pub storage_write_latency_history: VecDeque<f64>, // Write latency ms
+    pub storage_queue_depth_history: VecDeque<f64>,   // Queue depth
+    pub storage_busy_history: VecDeque<f64>,        // Avg busy %
 
     // Per-drive busy % history for individual sparklines
     pub drive_busy_history: HashMap<String, VecDeque<f64>>,
@@ -57,9 +61,13 @@ impl Default for AppState {
             memory_history: VecDeque::new(),
             arc_size_history: VecDeque::new(),
             arc_ratio_history: VecDeque::new(),
-            storage_iops_history: VecDeque::new(),
+            storage_read_iops_history: VecDeque::new(),
+            storage_write_iops_history: VecDeque::new(),
             storage_read_bw_history: VecDeque::new(),
             storage_write_bw_history: VecDeque::new(),
+            storage_read_latency_history: VecDeque::new(),
+            storage_write_latency_history: VecDeque::new(),
+            storage_queue_depth_history: VecDeque::new(),
             storage_busy_history: VecDeque::new(),
             drive_busy_history: HashMap::new(),
             network_history: HashMap::new(),
@@ -73,8 +81,23 @@ impl AppState {
     }
 
     /// Update history size based on terminal width
+    /// Pre-fills storage history buffers with zeros on first call so charts scroll from start
     pub fn set_terminal_width(&mut self, width: u16) {
-        self.history_size = (width as usize).max(MIN_HISTORY_SIZE);
+        let new_size = (width as usize * 2).max(MIN_HISTORY_SIZE); // *2 for braille resolution
+
+        // Pre-fill storage histories if they're empty (first call)
+        if self.storage_read_iops_history.is_empty() {
+            self.storage_read_iops_history = VecDeque::from(vec![0.0; new_size]);
+            self.storage_write_iops_history = VecDeque::from(vec![0.0; new_size]);
+            self.storage_read_bw_history = VecDeque::from(vec![0.0; new_size]);
+            self.storage_write_bw_history = VecDeque::from(vec![0.0; new_size]);
+            self.storage_read_latency_history = VecDeque::from(vec![0.0; new_size]);
+            self.storage_write_latency_history = VecDeque::from(vec![0.0; new_size]);
+            self.storage_queue_depth_history = VecDeque::from(vec![0.0; new_size]);
+            self.storage_busy_history = VecDeque::from(vec![0.0; new_size]);
+        }
+
+        self.history_size = new_size;
     }
 
     fn trim_history<T>(history: &mut VecDeque<T>, max_size: usize) {
@@ -91,9 +114,38 @@ impl AppState {
         let history_size = self.history_size;
 
         // Calculate aggregate stats from multipath devices only (no double counting)
-        let total_iops: f64 = multipath_devices.iter().map(|d| d.statistics.total_iops()).sum();
+        let total_read_iops: f64 = multipath_devices.iter().map(|d| d.statistics.read_iops).sum();
+        let total_write_iops: f64 = multipath_devices.iter().map(|d| d.statistics.write_iops).sum();
         let total_read_bw: f64 = multipath_devices.iter().map(|d| d.statistics.read_bw_mbps).sum();
         let total_write_bw: f64 = multipath_devices.iter().map(|d| d.statistics.write_bw_mbps).sum();
+
+        // Average latency (weighted by IOPS would be better, but simple avg for now)
+        let (avg_read_latency, avg_write_latency) = if !multipath_devices.is_empty() {
+            let active_read: Vec<_> = multipath_devices.iter()
+                .filter(|d| d.statistics.read_iops > 0.1)
+                .collect();
+            let active_write: Vec<_> = multipath_devices.iter()
+                .filter(|d| d.statistics.write_iops > 0.1)
+                .collect();
+
+            let read_lat = if !active_read.is_empty() {
+                active_read.iter().map(|d| d.statistics.read_latency_ms).sum::<f64>() / active_read.len() as f64
+            } else {
+                0.0
+            };
+            let write_lat = if !active_write.is_empty() {
+                active_write.iter().map(|d| d.statistics.write_latency_ms).sum::<f64>() / active_write.len() as f64
+            } else {
+                0.0
+            };
+            (read_lat, write_lat)
+        } else {
+            (0.0, 0.0)
+        };
+
+        // Sum queue depths
+        let total_queue_depth: f64 = multipath_devices.iter().map(|d| d.statistics.queue_depth).sum();
+
         let avg_busy: f64 = if !multipath_devices.is_empty() {
             multipath_devices.iter().map(|d| d.statistics.busy_pct).sum::<f64>() / multipath_devices.len() as f64
         } else {
@@ -101,14 +153,26 @@ impl AppState {
         };
 
         // Update storage history
-        self.storage_iops_history.push_back(total_iops);
-        Self::trim_history(&mut self.storage_iops_history, history_size);
+        self.storage_read_iops_history.push_back(total_read_iops);
+        Self::trim_history(&mut self.storage_read_iops_history, history_size);
+
+        self.storage_write_iops_history.push_back(total_write_iops);
+        Self::trim_history(&mut self.storage_write_iops_history, history_size);
 
         self.storage_read_bw_history.push_back(total_read_bw);
         Self::trim_history(&mut self.storage_read_bw_history, history_size);
 
         self.storage_write_bw_history.push_back(total_write_bw);
         Self::trim_history(&mut self.storage_write_bw_history, history_size);
+
+        self.storage_read_latency_history.push_back(avg_read_latency);
+        Self::trim_history(&mut self.storage_read_latency_history, history_size);
+
+        self.storage_write_latency_history.push_back(avg_write_latency);
+        Self::trim_history(&mut self.storage_write_latency_history, history_size);
+
+        self.storage_queue_depth_history.push_back(total_queue_depth);
+        Self::trim_history(&mut self.storage_queue_depth_history, history_size);
 
         self.storage_busy_history.push_back(avg_busy);
         Self::trim_history(&mut self.storage_busy_history, history_size);
@@ -117,7 +181,10 @@ impl AppState {
         for device in &multipath_devices {
             let history = self.drive_busy_history
                 .entry(device.name.clone())
-                .or_insert_with(VecDeque::new);
+                .or_insert_with(|| {
+                    // Pre-fill with zeros so sparkline scrolls from start
+                    VecDeque::from(vec![0.0; history_size])
+                });
 
             history.push_back(device.statistics.busy_pct);
             Self::trim_history(history, history_size);
@@ -174,7 +241,10 @@ impl AppState {
             let total_bw_raw = iface.rx_bytes_per_sec_raw + iface.tx_bytes_per_sec_raw;
             let history = self.network_history
                 .entry(iface.name.clone())
-                .or_insert_with(VecDeque::new);
+                .or_insert_with(|| {
+                    // Pre-fill with zeros so chart scrolls from start
+                    VecDeque::from(vec![0.0; history_size])
+                });
             history.push_back(total_bw_raw);
             Self::trim_history(history, history_size);
         }

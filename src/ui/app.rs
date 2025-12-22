@@ -3,7 +3,7 @@ use crate::ui::components::{render_front_panel, render_system_overview};
 use crate::ui::state::AppState;
 use anyhow::Result;
 use crossterm::{
-    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent},
+    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyModifiers},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -17,7 +17,7 @@ use ratatui::{
 };
 use std::io;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 pub fn run_tui(state: Arc<Mutex<AppState>>) -> Result<()> {
     // Setup terminal
@@ -43,7 +43,19 @@ pub fn run_tui(state: Arc<Mutex<AppState>>) -> Result<()> {
 }
 
 fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, state: Arc<Mutex<AppState>>) -> Result<()> {
+    // Track last full screen clear to handle kernel console output clobbering
+    let mut last_clear = Instant::now();
+    const CLEAR_INTERVAL: Duration = Duration::from_secs(10);
+    let mut force_clear = false;
+
     loop {
+        // Periodic full screen clear to remove any kernel console garbage
+        if force_clear || last_clear.elapsed() >= CLEAR_INTERVAL {
+            terminal.clear()?;
+            last_clear = Instant::now();
+            force_clear = false;
+        }
+
         // Update terminal width in state for dynamic history sizing
         let terminal_size = terminal.size()?;
         {
@@ -65,7 +77,7 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, state: Arc<Mut
                     Constraint::Length(3),      // Header
                     Constraint::Percentage(30), // System stats (top)
                     Constraint::Min(12),        // Drive array (bottom)
-                    Constraint::Length(3),      // Footer
+                    Constraint::Length(1),      // Footer (single line, no border)
                 ])
                 .split(frame.size());
 
@@ -117,9 +129,13 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, state: Arc<Mut
                 frame,
                 chunks[2],
                 &current_state.multipath_devices,
-                &current_state.storage_iops_history,
+                &current_state.storage_read_iops_history,
+                &current_state.storage_write_iops_history,
                 &current_state.storage_read_bw_history,
                 &current_state.storage_write_bw_history,
+                &current_state.storage_read_latency_history,
+                &current_state.storage_write_latency_history,
+                &current_state.storage_queue_depth_history,
                 &current_state.storage_busy_history,
                 &current_state.drive_busy_history,
             );
@@ -131,8 +147,10 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, state: Arc<Mut
         // Handle input with timeout to allow for periodic updates
         if event::poll(Duration::from_millis(100))? {
             if let Event::Key(key) = event::read()? {
-                if handle_key_event(key, &state) {
-                    break;  // User requested quit
+                match handle_key_event(key, &state) {
+                    KeyAction::Quit => break,
+                    KeyAction::Redraw => force_clear = true,
+                    KeyAction::None => {}
                 }
             }
         }
@@ -177,10 +195,13 @@ fn render_header(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state:
 
 fn render_footer(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &AppState) {
     let footer_text = Line::from(vec![
-        Span::raw("[Q]uit / [Esc]  "),
+        Span::styled("[Q]", Style::default().fg(Color::Cyan)),
+        Span::styled("uit ", Style::default().fg(Color::DarkGray)),
+        Span::styled("[R]", Style::default().fg(Color::Cyan)),
+        Span::styled("edraw  ", Style::default().fg(Color::DarkGray)),
         Span::styled(
             format!(
-                "{} multipath devices, {} standalone",
+                "│ {} multipath, {} standalone",
                 state.multipath_devices.len(),
                 state.standalone_disks.len()
             ),
@@ -188,23 +209,26 @@ fn render_footer(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state:
         ),
     ]);
 
-    let footer = Paragraph::new(footer_text)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Cyan)),
-        );
-
+    let footer = Paragraph::new(footer_text);
     frame.render_widget(footer, area);
 }
 
-fn handle_key_event(key: KeyEvent, state: &Arc<Mutex<AppState>>) -> bool {
+enum KeyAction {
+    None,
+    Quit,
+    Redraw,
+}
+
+fn handle_key_event(key: KeyEvent, state: &Arc<Mutex<AppState>>) -> KeyAction {
     match key.code {
         KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => {
             let mut state_guard = state.lock().unwrap();
             state_guard.quit();
-            true
+            KeyAction::Quit
         }
-        _ => false,
+        // Ctrl-L or 'r' to force screen redraw (clears kernel console garbage)
+        KeyCode::Char('l') if key.modifiers.contains(KeyModifiers::CONTROL) => KeyAction::Redraw,
+        KeyCode::Char('r') | KeyCode::Char('R') => KeyAction::Redraw,
+        _ => KeyAction::None,
     }
 }

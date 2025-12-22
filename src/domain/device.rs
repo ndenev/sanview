@@ -13,6 +13,15 @@ pub struct PhysicalDisk {
     pub path_state: PathState,
 }
 
+/// Per-path I/O statistics for dual-controller tracking
+#[derive(Clone, Debug)]
+pub struct PathStats {
+    pub device_name: String,              // e.g., "da0"
+    pub controller: u8,                   // 0 = Controller A, 1 = Controller B
+    pub is_active: bool,                  // Is this the active path?
+    pub statistics: DiskStatistics,
+}
+
 #[derive(Clone, Debug)]
 pub struct MultipathDevice {
     pub name: String,                     // "multipath/2MVULJ1A"
@@ -20,7 +29,8 @@ pub struct MultipathDevice {
     pub state: MultipathState,            // OPTIMAL, DEGRADED, FAILED
     pub paths: Vec<String>,               // ["da0", "da1"]
     pub active_path: Option<String>,      // Currently active path
-    pub statistics: DiskStatistics,       // Aggregated statistics
+    pub statistics: DiskStatistics,       // Aggregated statistics (from multipath device)
+    pub path_stats: Vec<PathStats>,       // Per-path stats for controller activity LEDs
     pub zfs_info: Option<ZfsDriveInfo>,   // ZFS pool/vdev/role information
     pub slot: Option<usize>,              // Physical enclosure slot number
 }

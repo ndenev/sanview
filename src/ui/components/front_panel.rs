@@ -3,8 +3,9 @@ use crate::domain::device::MultipathDevice;
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Style},
+    symbols::Marker,
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph, Sparkline},
+    widgets::{Axis, Block, Borders, Chart, Dataset, Paragraph, Sparkline},
     Frame,
 };
 use std::collections::{HashMap, VecDeque};
@@ -14,9 +15,13 @@ pub fn render_front_panel(
     frame: &mut Frame,
     area: Rect,
     devices: &[MultipathDevice],
-    iops_history: &VecDeque<f64>,
+    read_iops_history: &VecDeque<f64>,
+    write_iops_history: &VecDeque<f64>,
     read_bw_history: &VecDeque<f64>,
     write_bw_history: &VecDeque<f64>,
+    read_latency_history: &VecDeque<f64>,
+    write_latency_history: &VecDeque<f64>,
+    queue_depth_history: &VecDeque<f64>,
     busy_history: &VecDeque<f64>,
     drive_busy_history: &HashMap<String, VecDeque<f64>>,
 ) {
@@ -32,8 +37,8 @@ pub fn render_front_panel(
     let horiz_chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Percentage(55),  // Left: drives visual + cumulative sparklines
-            Constraint::Percentage(45),  // Right: per-drive stats (full height)
+            Constraint::Percentage(65),  // Left: drives visual + cumulative sparklines
+            Constraint::Percentage(35),  // Right: per-drive stats (narrower)
         ])
         .split(inner);
 
@@ -41,17 +46,17 @@ pub fn render_front_panel(
     let left_chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(8),   // Drives visual (7) + legend (1)
-            Constraint::Min(4),      // Cumulative sparklines (remaining space)
+            Constraint::Length(9),   // Drives visual (8) + legend (1)
+            Constraint::Fill(1),     // Cumulative sparklines (fills all remaining space)
         ])
         .split(horiz_chunks[0]);
 
     // Layout drives area with legend
-    // Drive bay: 2 outer border + 3 content + 2 drive border = 7 lines
+    // Drive bay: 2 outer border + 4 content + 2 drive border = 8 lines
     let drive_chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(7),   // Drive bay with outer border
+            Constraint::Length(8),   // Drive bay with outer border
             Constraint::Length(1),   // Legend
         ])
         .split(left_chunks[0]);
@@ -114,12 +119,16 @@ pub fn render_front_panel(
     frame.render_widget(legend, drive_chunks[1]);
 
     // Render cumulative sparklines below drives
-    render_storage_sparklines(
+    render_storage_charts(
         frame,
         left_chunks[1],
-        iops_history,
+        read_iops_history,
+        write_iops_history,
         read_bw_history,
         write_bw_history,
+        read_latency_history,
+        write_latency_history,
+        queue_depth_history,
         busy_history,
     );
 
@@ -127,80 +136,137 @@ pub fn render_front_panel(
     render_drive_stats(frame, horiz_chunks[1], devices, drive_busy_history);
 }
 
-fn render_storage_sparklines(
+fn render_storage_charts(
     frame: &mut Frame,
     area: Rect,
-    iops_history: &VecDeque<f64>,
+    read_iops_history: &VecDeque<f64>,
+    write_iops_history: &VecDeque<f64>,
     read_bw_history: &VecDeque<f64>,
     write_bw_history: &VecDeque<f64>,
-    busy_history: &VecDeque<f64>,
+    read_latency_history: &VecDeque<f64>,
+    write_latency_history: &VecDeque<f64>,
+    queue_depth_history: &VecDeque<f64>,
+    _busy_history: &VecDeque<f64>,
 ) {
-    // Split into 4 rows for different metrics, adapting to available height
-    // Each row needs at least 2 lines (1 label + 1 sparkline)
-    let row_height = (area.height / 4).max(2);
+    // Split into 4 equal rows for different metrics
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(row_height),
-            Constraint::Length(row_height),
-            Constraint::Length(row_height),
-            Constraint::Length(row_height),
+            Constraint::Fill(1),
+            Constraint::Fill(1),
+            Constraint::Fill(1),
+            Constraint::Fill(1),
         ])
         .split(area);
 
-    // Helper to render a single sparkline with label
-    let render_sparkline = |frame: &mut Frame, chunk: Rect, history: &VecDeque<f64>, label: String, color: Color| {
-        if history.is_empty() || chunk.height < 2 {
+    // Helper to render a chart with label on separate line above
+    let render_chart = |frame: &mut Frame,
+                        chunk: Rect,
+                        history: &VecDeque<f64>,
+                        label: String,
+                        color: Color| {
+        if chunk.height < 2 {
             return;
         }
 
+        // Split: 1 line for label, rest for chart
         let sub_chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(1),       // Label
-                Constraint::Min(1),          // Sparkline (remaining height)
+                Constraint::Length(1),  // Label line (fixed)
+                Constraint::Fill(1),    // Chart (fills remaining)
             ])
             .split(chunk);
 
-        // Sliding window: take last N points that fit the width
-        let width = sub_chunks[1].width as usize;
-        let start = if history.len() > width {
-            history.len() - width
-        } else {
-            0
-        };
-        let data: Vec<u64> = history.iter().skip(start).map(|&v| v as u64).collect();
+        // Render label
+        let label_widget = Paragraph::new(label)
+            .style(Style::default().fg(Color::White));
+        frame.render_widget(label_widget, sub_chunks[0]);
 
-        let paragraph = Paragraph::new(label)
-            .style(Style::default().fg(color));
-        frame.render_widget(paragraph, sub_chunks[0]);
+        // Render chart if we have space
+        if sub_chunks[1].height < 1 || history.is_empty() {
+            return;
+        }
 
-        let sparkline = Sparkline::default()
-            .data(&data)
+        // Use chart width to determine how many points to display
+        // Each braille character is 2 dots wide, so we can fit width * 2 points
+        let chart_width = sub_chunks[1].width as usize;
+        let max_points = chart_width * 2;
+
+        // Take the most recent points (history is pre-filled so always has enough)
+        let start = history.len().saturating_sub(max_points);
+        let data: Vec<(f64, f64)> = history
+            .iter()
+            .skip(start)
+            .enumerate()
+            .map(|(i, &v)| (i as f64, v))
+            .collect();
+
+        // Find max Y value for scaling
+        let max_y = history.iter().cloned().fold(1.0_f64, f64::max) * 1.1;
+
+        let dataset = Dataset::default()
+            .marker(Marker::Braille)
+            .graph_type(ratatui::widgets::GraphType::Line)
             .style(Style::default().fg(color))
-            .bar_set(ratatui::symbols::bar::NINE_LEVELS);
-        frame.render_widget(sparkline, sub_chunks[1]);
+            .data(&data);
+
+        // X bounds match actual data length
+        let x_max = (data.len().saturating_sub(1)) as f64;
+        let chart = Chart::new(vec![dataset])
+            .x_axis(
+                Axis::default()
+                    .bounds([0.0, x_max.max(1.0)])
+            )
+            .y_axis(
+                Axis::default()
+                    .bounds([0.0, max_y.max(1.0)])
+            )
+            .hidden_legend_constraints((Constraint::Ratio(0, 1), Constraint::Ratio(0, 1)));
+
+        frame.render_widget(chart, sub_chunks[1]);
     };
 
-    // IOPS sparkline
-    let max_iops = iops_history.iter().cloned().fold(0.0f64, f64::max);
-    let iops_label = format!("IOPS: {:.0} (max: {:.0})", iops_history.back().unwrap_or(&0.0), max_iops);
-    render_sparkline(frame, chunks[0], iops_history, iops_label, Color::Green);
+    // Helper to combine two histories into total
+    let combine_histories = |h1: &VecDeque<f64>, h2: &VecDeque<f64>| -> VecDeque<f64> {
+        let len = h1.len().max(h2.len());
+        let mut combined = VecDeque::with_capacity(len);
+        for i in 0..len {
+            let v1 = h1.get(i).unwrap_or(&0.0);
+            let v2 = h2.get(i).unwrap_or(&0.0);
+            combined.push_back(v1 + v2);
+        }
+        combined
+    };
 
-    // Read BW sparkline
-    let max_read = read_bw_history.iter().cloned().fold(0.0f64, f64::max);
-    let read_label = format!("Read: {:.1} MB/s (max: {:.1})", read_bw_history.back().unwrap_or(&0.0), max_read);
-    render_sparkline(frame, chunks[1], read_bw_history, read_label, Color::Cyan);
+    // IOPS (combined read + write)
+    let total_iops = combine_histories(read_iops_history, write_iops_history);
+    let cur_read_iops = read_iops_history.back().unwrap_or(&0.0);
+    let cur_write_iops = write_iops_history.back().unwrap_or(&0.0);
+    let iops_label = format!("IOPS: R:{:.0} W:{:.0} T:{:.0}", cur_read_iops, cur_write_iops, cur_read_iops + cur_write_iops);
+    render_chart(frame, chunks[0], &total_iops, iops_label, Color::Cyan);
 
-    // Write BW sparkline
-    let max_write = write_bw_history.iter().cloned().fold(0.0f64, f64::max);
-    let write_label = format!("Write: {:.1} MB/s (max: {:.1})", write_bw_history.back().unwrap_or(&0.0), max_write);
-    render_sparkline(frame, chunks[2], write_bw_history, write_label, Color::Yellow);
+    // Throughput (combined read + write)
+    let total_bw = combine_histories(read_bw_history, write_bw_history);
+    let cur_read_bw = read_bw_history.back().unwrap_or(&0.0);
+    let cur_write_bw = write_bw_history.back().unwrap_or(&0.0);
+    let bw_label = format!("MB/s: R:{:.1} W:{:.1} T:{:.1}", cur_read_bw, cur_write_bw, cur_read_bw + cur_write_bw);
+    render_chart(frame, chunks[1], &total_bw, bw_label, Color::Green);
 
-    // Busy % sparkline
-    let max_busy = busy_history.iter().cloned().fold(0.0f64, f64::max);
-    let busy_label = format!("Busy: {:.1}% (max: {:.1}%)", busy_history.back().unwrap_or(&0.0), max_busy);
-    render_sparkline(frame, chunks[3], busy_history, busy_label, Color::Gray);
+    // Latency (show max of read/write for worst-case view)
+    let max_latency: VecDeque<f64> = read_latency_history.iter()
+        .zip(write_latency_history.iter())
+        .map(|(r, w)| r.max(*w))
+        .collect();
+    let cur_read_lat = read_latency_history.back().unwrap_or(&0.0);
+    let cur_write_lat = write_latency_history.back().unwrap_or(&0.0);
+    let lat_label = format!("Latency(ms): R:{:.1} W:{:.1}", cur_read_lat, cur_write_lat);
+    render_chart(frame, chunks[2], &max_latency, lat_label, Color::Yellow);
+
+    // Queue depth
+    let cur_qd = queue_depth_history.back().unwrap_or(&0.0);
+    let qd_label = format!("Queue Depth: {:.0}", cur_qd);
+    render_chart(frame, chunks[3], queue_depth_history, qd_label, Color::Magenta);
 }
 
 fn render_drive_stats(
@@ -209,9 +275,10 @@ fn render_drive_stats(
     devices: &[MultipathDevice],
     drive_busy_history: &HashMap<String, VecDeque<f64>>,
 ) {
+    // Just use left border as separator (main panel provides outer border)
     let block = Block::default()
         .title(format!(" Drives ({}) ", devices.len()))
-        .borders(Borders::LEFT | Borders::TOP | Borders::BOTTOM)
+        .borders(Borders::LEFT)
         .border_style(Style::default().fg(Color::DarkGray));
 
     let inner = block.inner(area);
@@ -244,11 +311,55 @@ fn render_drive_stats(
         })
         .collect();
 
+    // Column widths - expanded layout with more ZFS info
+    // SL POOL ROLE  VDEV S  IOPS MB/s BSY [sparkline]
+    const SLOT_W: usize = 2;
+    const POOL_W: usize = 4;
+    const ROLE_W: usize = 5;
+    const VDEV_W: usize = 4;
+    const STATE_W: usize = 1;
+    const IOPS_W: usize = 5;
+    const BW_W: usize = 5;
+    const BUSY_W: usize = 3;
+    // Total: 2+1+4+1+5+1+4+1+1+1+5+1+5+1+3+1 = 37 chars before sparkline
+    const FIXED_PREFIX: u16 = (SLOT_W + 1 + POOL_W + 1 + ROLE_W + 1 + VDEV_W + 1 + STATE_W + 1 + IOPS_W + 1 + BW_W + 1 + BUSY_W + 1) as u16;
+
+    // Render header if we have space
     let available_height = inner.height as usize;
-    let drives_to_show = available_height.min(slot_devices.len());
+    let show_header = available_height > 1;
+    let header_offset: u16 = if show_header { 1 } else { 0 };
+
+    if show_header {
+        let header_area = Rect {
+            x: inner.x,
+            y: inner.y,
+            width: inner.width,
+            height: 1,
+        };
+        let header = Line::from(vec![
+            Span::styled(format!("{:<SLOT_W$}", "SL"), Style::default().fg(Color::DarkGray)),
+            Span::raw(" "),
+            Span::styled(format!("{:<POOL_W$}", "POOL"), Style::default().fg(Color::DarkGray)),
+            Span::raw(" "),
+            Span::styled(format!("{:<ROLE_W$}", "ROLE"), Style::default().fg(Color::DarkGray)),
+            Span::raw(" "),
+            Span::styled(format!("{:<VDEV_W$}", "VDEV"), Style::default().fg(Color::DarkGray)),
+            Span::raw(" "),
+            Span::styled("S", Style::default().fg(Color::DarkGray)),
+            Span::raw(" "),
+            Span::styled(format!("{:>IOPS_W$}", "IOPS"), Style::default().fg(Color::DarkGray)),
+            Span::raw(" "),
+            Span::styled(format!("{:>BW_W$}", "MB/s"), Style::default().fg(Color::DarkGray)),
+            Span::raw(" "),
+            Span::styled(format!("{:>BUSY_W$}", "BSY"), Style::default().fg(Color::DarkGray)),
+        ]);
+        frame.render_widget(Paragraph::new(header), header_area);
+    }
+
+    let drives_to_show = (available_height - header_offset as usize).min(slot_devices.len());
 
     for (idx, (slot, dev)) in slot_devices.iter().take(drives_to_show).enumerate() {
-        let y_pos = inner.y + idx as u16;
+        let y_pos = inner.y + header_offset + idx as u16;
         if y_pos >= inner.y + inner.height {
             break;
         }
@@ -260,87 +371,91 @@ fn render_drive_stats(
             height: 1,
         };
 
-        // Use actual physical slot number (already 1-based from SES element number)
+        // Slot number
         let slot_label = format!("{:02}", slot);
 
-        // Extract device serial from multipath name
-        let serial = dev.name.split('/').last().unwrap_or(&dev.name);
+        // Pool name (truncated)
+        let pool_name = dev.zfs_info.as_ref()
+            .map(|z| truncate_str(&z.pool, POOL_W))
+            .unwrap_or_else(|| "-".to_string());
 
-        // Get ZFS vdev info - format: role(vdev_index) e.g., "data(0)", "log", "cache", "spare"
-        let vdev_label = if let Some(ref zfs_info) = dev.zfs_info {
-            // Extract vdev index number (e.g., "raidz1-0" -> "0", "mirror-2" -> "2")
-            let vdev_idx = zfs_info.vdev
-                .split('-')
-                .last()
-                .and_then(|s| s.parse::<u32>().ok());
-
+        // Role name and color
+        let (role_name, role_color) = if let Some(ref zfs_info) = dev.zfs_info {
             match zfs_info.role {
-                ZfsRole::Data => {
-                    if let Some(idx) = vdev_idx {
-                        format!("data({})", idx)
-                    } else {
-                        "data".to_string()
-                    }
-                }
-                ZfsRole::Slog => {
-                    if let Some(idx) = vdev_idx {
-                        format!("log({})", idx)
-                    } else {
-                        "log".to_string()
-                    }
-                }
-                ZfsRole::Cache => {
-                    if let Some(idx) = vdev_idx {
-                        format!("cache({})", idx)
-                    } else {
-                        "cache".to_string()
-                    }
-                }
-                ZfsRole::Spare => "spare".to_string(),
+                ZfsRole::Data => ("data", Color::Cyan),
+                ZfsRole::Slog => ("log", Color::Yellow),
+                ZfsRole::Cache => ("cache", Color::Magenta),
+                ZfsRole::Spare => ("spare", Color::Blue),
             }
         } else {
-            "".to_string()
+            ("-", Color::DarkGray)
         };
 
-        // Determine colors based on ZFS role and busy %
-        let busy_color = if dev.statistics.busy_pct > 80.0 {
+        // Vdev topology shorthand: raidz1-0 -> r1-0, mirror-5 -> mi-5
+        // Shows "-" for devices without a vdev (individual cache/spare)
+        let vdev_short = if let Some(ref zfs_info) = dev.zfs_info {
+            let vdev = &zfs_info.vdev;
+            if vdev.starts_with("raidz3") {
+                vdev.replace("raidz3-", "r3-")
+            } else if vdev.starts_with("raidz2") {
+                vdev.replace("raidz2-", "r2-")
+            } else if vdev.starts_with("raidz1") {
+                vdev.replace("raidz1-", "r1-")
+            } else if vdev.starts_with("raidz") {
+                vdev.replace("raidz-", "rz-")
+            } else if vdev.starts_with("mirror") {
+                vdev.replace("mirror-", "mi-")
+            } else if vdev.is_empty() {
+                "-".to_string()
+            } else {
+                truncate_str(vdev, VDEV_W)
+            }
+        } else {
+            "-".to_string()
+        };
+        let vdev_padded = format!("{:<VDEV_W$}", truncate_str(&vdev_short, VDEV_W));
+
+        // State indicator (colored dot)
+        let (state_char, state_color) = if let Some(ref zfs_info) = dev.zfs_info {
+            match zfs_info.state.to_uppercase().as_str() {
+                "ONLINE" => ("●", Color::Green),
+                "DEGRADED" => ("●", Color::Yellow),
+                "FAULTED" | "UNAVAIL" | "OFFLINE" => ("●", Color::Red),
+                "AVAIL" => ("○", Color::Green),  // Spare available
+                _ => ("○", Color::DarkGray),
+            }
+        } else {
+            ("○", Color::DarkGray)
+        };
+
+        // IOPS (total read + write)
+        let total_iops = dev.statistics.total_iops();
+        let iops_text = if total_iops >= 10000.0 {
+            format!("{:>4.0}k", total_iops / 1000.0)
+        } else {
+            format!("{:>IOPS_W$.0}", total_iops)
+        };
+
+        // Throughput MB/s (total)
+        let total_bw = dev.statistics.total_bw_mbps();
+        let bw_text = if total_bw >= 1000.0 {
+            format!("{:>4.1}G", total_bw / 1000.0)
+        } else {
+            format!("{:>BW_W$.1}", total_bw)
+        };
+
+        // Busy %
+        let busy_pct = dev.statistics.busy_pct;
+        let busy_text = format!("{:>2.0}%", busy_pct.min(99.0));
+        let busy_color = if busy_pct > 80.0 {
             Color::Red
-        } else if dev.statistics.busy_pct > 50.0 {
+        } else if busy_pct > 50.0 {
             Color::Yellow
-        } else if dev.statistics.busy_pct > 0.1 {
+        } else if busy_pct > 0.1 {
             Color::Green
         } else {
             Color::DarkGray
         };
-
-        let role_color = if let Some(ref zfs_info) = dev.zfs_info {
-            match zfs_info.role {
-                ZfsRole::Slog => Color::Yellow,
-                ZfsRole::Cache => Color::Magenta,
-                ZfsRole::Spare => Color::Blue,
-                ZfsRole::Data => Color::Cyan,
-            }
-        } else {
-            Color::DarkGray
-        };
-
-        // Fixed-width columns for alignment:
-        // slot: 2 chars, vdev: 8 chars, serial: 8 chars, busy: 5 chars, spaces: 4
-        // Total fixed prefix: 27 chars
-        const SLOT_WIDTH: usize = 2;
-        const VDEV_WIDTH: usize = 8;
-        const SERIAL_WIDTH: usize = 8;
-        const BUSY_WIDTH: usize = 5;
-        const FIXED_PREFIX: u16 = (SLOT_WIDTH + 1 + VDEV_WIDTH + 1 + SERIAL_WIDTH + 1 + BUSY_WIDTH + 1) as u16;
-
-        // Pad/truncate vdev label to fixed width
-        let vdev_padded = format!("{:<width$}", vdev_label, width = VDEV_WIDTH);
-
-        // Pad/truncate serial to fixed width
-        let serial_padded = format!("{:<width$}", serial, width = SERIAL_WIDTH);
-
-        // Format busy % with fixed width
-        let busy_text = format!("{:>4.0}%", dev.statistics.busy_pct);
 
         // Calculate sparkline width (remaining space)
         let sparkline_width = if inner.width > FIXED_PREFIX {
@@ -348,6 +463,26 @@ fn render_drive_stats(
         } else {
             0
         };
+
+        // Build spans
+        let mut spans = vec![
+            Span::styled(&slot_label, Style::default().fg(Color::White)),
+            Span::raw(" "),
+            Span::styled(format!("{:<POOL_W$}", pool_name), Style::default().fg(Color::DarkGray)),
+            Span::raw(" "),
+            Span::styled(format!("{:<ROLE_W$}", role_name), Style::default().fg(role_color)),
+            Span::raw(" "),
+            Span::styled(&vdev_padded, Style::default().fg(Color::DarkGray)),
+            Span::raw(" "),
+            Span::styled(state_char, Style::default().fg(state_color)),
+            Span::raw(" "),
+            Span::styled(&iops_text, Style::default().fg(Color::White)),
+            Span::raw(" "),
+            Span::styled(&bw_text, Style::default().fg(Color::White)),
+            Span::raw(" "),
+            Span::styled(&busy_text, Style::default().fg(busy_color)),
+            Span::raw(" "),
+        ];
 
         if sparkline_width > 0 {
             // Split area: text on left, sparkline on right
@@ -365,26 +500,12 @@ fn render_drive_stats(
                 height: 1,
             };
 
-            // Render text: slot, vdev role, serial, busy %
-            let spans = vec![
-                Span::styled(&slot_label, Style::default().fg(Color::White)),
-                Span::raw(" "),
-                Span::styled(&vdev_padded, Style::default().fg(role_color)),
-                Span::raw(" "),
-                Span::styled(&serial_padded, Style::default().fg(Color::DarkGray)),
-                Span::raw(" "),
-                Span::styled(&busy_text, Style::default().fg(busy_color)),
-                Span::raw(" "),
-            ];
-
             let text = Line::from(spans);
-            let text_widget = Paragraph::new(text);
-            frame.render_widget(text_widget, text_area);
+            frame.render_widget(Paragraph::new(text), text_area);
 
             // Render sparkline if we have history for this device
             if let Some(history) = drive_busy_history.get(&dev.name) {
                 if !history.is_empty() {
-                    // Sliding window: take last N points that fit the width
                     let start = if history.len() > sparkline_width {
                         history.len() - sparkline_width
                     } else {
@@ -399,60 +520,76 @@ fn render_drive_stats(
                 }
             }
         } else {
-            // Not enough space for sparkline, just show text
-            let spans = vec![
-                Span::styled(&slot_label, Style::default().fg(Color::White)),
-                Span::raw(" "),
-                Span::styled(&vdev_padded, Style::default().fg(role_color)),
-                Span::raw(" "),
-                Span::styled(&serial_padded, Style::default().fg(Color::DarkGray)),
-                Span::raw(" "),
-                Span::styled(&busy_text, Style::default().fg(busy_color)),
-            ];
-
+            // Not enough space for sparkline, just show text without trailing space
+            spans.pop(); // Remove trailing space
             let text = Line::from(spans);
-            let text_widget = Paragraph::new(text);
-            frame.render_widget(text_widget, line_area);
+            frame.render_widget(Paragraph::new(text), line_area);
         }
+    }
+}
+
+/// Truncate a string to max_len characters
+fn truncate_str(s: &str, max_len: usize) -> String {
+    if s.len() <= max_len {
+        s.to_string()
+    } else {
+        s[..max_len].to_string()
     }
 }
 
 fn render_vertical_drive(frame: &mut Frame, area: Rect, slot: usize, devices: &[MultipathDevice]) {
     // Find device for this slot
-    // For now, we'll use a simple mapping - in the future this will use proper SES mapping
-    let device_info = find_device_for_slot(slot, devices);
+    let device = find_device_for_slot(slot, devices);
 
     // Slot number as vertical digits (1-based)
     let slot_num = slot + 1;
     let digit1 = format!("{}", slot_num / 10); // tens digit (0 for slots 1-9)
     let digit2 = format!("{}", slot_num % 10); // ones digit
 
-    let (drive_visual, border_color) = match device_info {
-        Some((_dev, stats)) => {
+    let (drive_visual, border_color) = match device {
+        Some(dev) => {
             // Determine blink state based on current time and activity
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap();
             let blink = (now.as_millis() / 250) % 2 == 0; // Toggle every 250ms
 
-            // Activity indicator - colored circles
-            let has_read = stats.read_iops > 0.1;
-            let has_write = stats.write_iops > 0.1;
-            let (activity_color, activity_char) = match (has_read, has_write) {
-                (true, true) => (Color::Magenta, if blink { "●" } else { "○" }),
-                (true, false) => (Color::Green, if blink { "●" } else { "○" }),
-                (false, true) => (Color::Yellow, if blink { "●" } else { "○" }),
-                (false, false) => (Color::DarkGray, "○"),
+            // Get per-controller activity from path_stats
+            // Controller A (0) LED at top, Controller B (1) LED at bottom
+            let ctrl_a_stats = dev.path_stats.iter().find(|p| p.controller == 0);
+            let ctrl_b_stats = dev.path_stats.iter().find(|p| p.controller == 1);
+
+            // Helper to determine LED state for a controller's path
+            let get_led = |path_stats: Option<&crate::domain::device::PathStats>| -> (Color, &str) {
+                match path_stats {
+                    Some(ps) => {
+                        let has_read = ps.statistics.read_iops > 0.1;
+                        let has_write = ps.statistics.write_iops > 0.1;
+                        match (has_read, has_write) {
+                            (true, true) => (Color::Magenta, if blink { "●" } else { "○" }),
+                            (true, false) => (Color::Green, if blink { "●" } else { "○" }),
+                            (false, true) => (Color::Yellow, if blink { "●" } else { "○" }),
+                            (false, false) => (Color::DarkGray, "○"),
+                        }
+                    }
+                    None => (Color::DarkGray, "○"),
+                }
             };
 
-            // Build vertical drive visualization: slot number on top, activity at bottom
+            let (led_a_color, led_a_char) = get_led(ctrl_a_stats);
+            let (led_b_color, led_b_char) = get_led(ctrl_b_stats);
+
+            // Build vertical drive visualization:
+            // Top LED (Controller A), slot digits, Bottom LED (Controller B)
             let visual = vec![
+                Line::from(Span::styled(led_a_char, Style::default().fg(led_a_color))),
                 Line::from(Span::styled(&digit1, Style::default().fg(Color::White))),
                 Line::from(Span::styled(&digit2, Style::default().fg(Color::White))),
-                Line::from(Span::styled(activity_char, Style::default().fg(activity_color))),
+                Line::from(Span::styled(led_b_char, Style::default().fg(led_b_color))),
             ];
 
-            // Color code border by busy percentage
+            // Color code border by busy percentage (from multipath device stats)
+            let stats = &dev.statistics;
             let color = if stats.busy_pct > 80.0 {
                 Color::Red
             } else if stats.busy_pct > 50.0 {
@@ -466,11 +603,12 @@ fn render_vertical_drive(frame: &mut Frame, area: Rect, slot: usize, devices: &[
             (visual, color)
         }
         None => {
-            // Empty slot - show slot number vertically
+            // Empty slot - show slot number vertically with empty LED positions
             let visual = vec![
+                Line::from(Span::styled(" ", Style::default().fg(Color::DarkGray))),
                 Line::from(Span::styled(&digit1, Style::default().fg(Color::DarkGray))),
                 Line::from(Span::styled(&digit2, Style::default().fg(Color::DarkGray))),
-                Line::from(" "),
+                Line::from(Span::styled(" ", Style::default().fg(Color::DarkGray))),
             ];
             (visual, Color::DarkGray)
         }
@@ -488,12 +626,11 @@ fn render_vertical_drive(frame: &mut Frame, area: Rect, slot: usize, devices: &[
 fn find_device_for_slot(
     slot: usize,
     devices: &[MultipathDevice],
-) -> Option<(&MultipathDevice, &crate::domain::device::DiskStatistics)> {
+) -> Option<&MultipathDevice> {
     // UI slot is 0-based (0-24), SES slot is 1-based (1-25)
     // Find device where device.slot matches the physical slot number
     let physical_slot = slot + 1;
     devices
         .iter()
         .find(|dev| dev.slot == Some(physical_slot))
-        .map(|dev| (dev, &dev.statistics))
 }

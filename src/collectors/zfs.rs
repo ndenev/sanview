@@ -112,15 +112,20 @@ impl ZfsCollector {
                 continue;
             }
 
-            // Check for role sections
-            if trimmed == "logs" {
+            // Check for role sections - reset vdev when entering new section
+            // Use first word only to handle trailing whitespace
+            let first_word = trimmed.split_whitespace().next().unwrap_or("");
+            if first_word == "logs" {
                 current_role = ZfsRole::Slog;
+                current_vdev = String::new();
                 continue;
-            } else if trimmed == "cache" {
+            } else if first_word == "cache" {
                 current_role = ZfsRole::Cache;
+                current_vdev = String::new();
                 continue;
-            } else if trimmed == "spares" {
+            } else if first_word == "spares" {
                 current_role = ZfsRole::Spare;
+                current_vdev = String::new();
                 continue;
             }
 

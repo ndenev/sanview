@@ -1,0 +1,139 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 640" style="background:#1a1b26">
+  <style>
+    text { font-family: monospace; font-size: 10px; fill: #a9b1d6; }
+    .title { fill: #7aa2f7; font-weight: bold; }
+    .header { fill: #7dcfff; }
+    .green { fill: #9ece6a; }
+    .red { fill: #f7768e; }
+    .yellow { fill: #e0af68; }
+    .magenta { fill: #bb9af7; }
+    .dim { fill: #565f89; }
+    .white { fill: #c0caf5; }
+  </style>
+  <rect width="100%" height="100%" fill="#1a1b26" rx="6"/>
+  
+  <!-- Window decoration -->
+  <circle cx="20" cy="16" r="6" fill="#f7768e"/>
+  <circle cx="38" cy="16" r="6" fill="#e0af68"/>
+  <circle cx="56" cy="16" r="6" fill="#9ece6a"/>
+  
+  <g transform="translate(12, 44)">
+    <!-- Header -->
+    <text x="0" y="0" class="header">┌────────────────────────────────────────────────────────────────────────────────────────────────────────┐</text>
+    <text x="0" y="14" class="header">│</text><text x="6" y="14" class="title">SANVIEW</text><text x="54" y="14"> - FreeBSD Storage Array Monitor</text><text x="282" y="14" class="dim">Updated: 0.1s ago</text><text x="606" y="14" class="header">│</text>
+    <text x="0" y="28" class="header">└────────────────────────────────────────────────────────────────────────────────────────────────────────┘</text>
+    
+    <!-- CPU Section -->
+    <text x="0" y="56" class="header">┌ CPU (16 cores) ─────────────────────────────────────────┐┌ bhyve VMs (3) ─────────────────────┐</text>
+    <text x="0" y="70">│</text><text x="6" y="70" class="green">○</text><text x="18" y="70" class="white">C0  24%</text>
+    <text x="66" y="70" class="green">○</text><text x="78" y="70" class="white">C4  39%</text>
+    <text x="126" y="70" class="green">○</text><text x="138" y="70" class="white">C8  27%</text>
+    <text x="186" y="70" class="green">○</text><text x="198" y="70" class="white">C12  9%</text>
+    <text x="252" y="70" class="dim">100%│</text>
+    <text x="300" y="70" class="header">││</text><text x="312" y="70" class="green">●</text><text x="324" y="70" class="white">k8s</text><text x="378" y="70" class="red">85.4%</text><text x="426" y="70" class="header">4.5G</text><text x="540" y="70" class="header">│</text>
+    
+    <text x="0" y="84">│</text><text x="6" y="84" class="green">○</text><text x="18" y="84" class="white">C1  33%</text>
+    <text x="66" y="84" class="green">○</text><text x="78" y="84" class="white">C5  27%</text>
+    <text x="126" y="84" class="green">○</text><text x="138" y="84" class="white">C9  21%</text>
+    <text x="186" y="84" class="green">○</text><text x="198" y="84" class="white">C13 12%</text>
+    <text x="252" y="84" class="dim">0</text><text x="276" y="84">│</text>
+    <text x="300" y="84" class="header">││</text><text x="312" y="84" class="green">●</text><text x="324" y="84" class="white">ubuntu</text><text x="378" y="84" class="dim">0.2%</text><text x="426" y="84" class="header">923M</text><text x="540" y="84" class="header">│</text>
+    
+    <text x="0" y="98" class="header">└──────────────────────────────────────────────────────────┘</text>
+    <text x="300" y="98" class="header">│</text><text x="312" y="98" class="green">●</text><text x="324" y="98" class="white">te-agent</text><text x="384" y="98" class="dim">0.0%</text><text x="426" y="98" class="header">657M</text><text x="540" y="98" class="header">│</text>
+    
+    <!-- Memory Section -->
+    <text x="0" y="112" class="header">┌ Memory ──────────────────────────────────────────────────┐</text>
+    <text x="300" y="112" class="header">└────────────────────────────────────┘</text>
+    <text x="0" y="126">│</text>
+    <text x="6" y="126" class="red">████████████████████████████████████████</text>
+    <text x="246" y="126" class="magenta">██████</text>
+    <text x="282" y="126" class="green">█</text>
+    <text x="288" y="126" class="yellow">█</text>
+    <text x="294" y="126" class="dim">░░░░░</text>
+    <text x="324" y="126">│</text>
+    <text x="336" y="126" class="header">┌ Jails (0) ─────────────────────────┐</text>
+    
+    <text x="0" y="140">│</text>
+    <text x="6" y="140" class="red">█</text><text x="12" y="140" class="dim">Wired:45G</text>
+    <text x="72" y="140" class="magenta">█</text><text x="78" y="140" class="dim">ARC:8G</text>
+    <text x="126" y="140" class="green">█</text><text x="132" y="140" class="dim">Active:0.9G</text>
+    <text x="204" y="140" class="yellow">█</text><text x="210" y="140" class="dim">Inactive:1.6G</text>
+    <text x="294" y="140" class="dim">░Free:6.7G</text>
+    <text x="360" y="140" class="white">/62G</text>
+    <text x="396" y="140">│</text>
+    <text x="336" y="140" class="header">│</text><text x="342" y="140" class="dim">No jails running</text><text x="540" y="140" class="header">│</text>
+    
+    <text x="0" y="154" class="header">└──────────────────────────────────────────────────────────┘</text>
+    <text x="336" y="154" class="header">└────────────────────────────────────┘</text>
+    
+    <!-- Network Section -->
+    <text x="0" y="168" class="header">┌ Network (4) ─────────────────────────────────────────────┐</text>
+    <text x="0" y="182">│</text><text x="6" y="182" class="white">lagg0</text><text x="48" y="182" class="green">▼ 2.7K</text><text x="96" y="182" class="yellow">▲ 23.7K</text><text x="162" y="182" class="dim">805.8K│</text>
+    <text x="0" y="196">│</text><text x="6" y="196" class="dim">└ixl0</text><text x="48" y="196" class="green">▼ 2.6K</text><text x="96" y="196" class="yellow">▲ 22.6K</text>
+    <text x="0" y="210" class="header">└──────────────────────────────────────────────────────────┘</text>
+    
+    <!-- Storage Array -->
+    <text x="0" y="238" class="header">┌ Storage Array - EMC2 25-Bay (Vertical 2.5" SAS) ─────────────────────────────────────────────────────┐</text>
+    <text x="0" y="252" class="dim">│┌─────────────────────────────────────────────────────────────────────┐│</text><text x="456" y="252">Drives (25)</text><text x="606" y="252" class="header">│</text>
+    
+    <!-- Drive slots row -->
+    <text x="0" y="266" class="dim">││</text>
+    <text x="12" y="266" class="dim">┌─┐┌─┐┌─┐</text><text x="48" y="266" class="green">┌─┐┌─┐</text><text x="78" y="266" class="dim">┌─┐┌─┐┌─┐┌─┐</text><text x="126" y="266" class="green">┌─┐┌─┐┌─┐┌─┐┌─┐</text><text x="186" y="266" class="dim">┌─┐</text><text x="198" y="266" class="green">┌─┐</text><text x="210" y="266" class="dim">┌─┐┌─┐┌─┐</text><text x="252" y="266" class="green">┌─┐</text><text x="264" y="266" class="dim">┌─┐┌─┐┌─┐┌─┐┌─┐</text>
+    <text x="324" y="266" class="dim">││</text><text x="336" y="266" class="dim">SL</text><text x="354" y="266" class="dim">POOL</text><text x="384" y="266" class="dim">ROLE</text><text x="420" y="266" class="dim">VDEV</text><text x="456" y="266" class="dim">S</text><text x="468" y="266" class="dim">IOPS</text><text x="504" y="266" class="dim">MB/s</text><text x="540" y="266" class="dim">BSY</text><text x="606" y="266" class="header">│</text>
+    
+    <!-- Activity LEDs row -->
+    <text x="0" y="280" class="dim">││</text>
+    <text x="12" y="280" class="dim">│○││○││○│</text><text x="48" y="280" class="green">│●││●│</text><text x="78" y="280" class="dim">│○││○││○││○│</text><text x="126" y="280" class="green">│●││●││●││●││●│</text><text x="186" y="280" class="dim">│⊘│</text><text x="198" y="280" class="green">│●│</text><text x="210" y="280" class="dim">│⊘││⊘││⊘│</text><text x="252" y="280" class="green">│●│</text><text x="264" y="280" class="dim">│⊘││⊘││⊘││⊘││⊘│</text>
+    <text x="324" y="280" class="dim">││</text><text x="336" y="280" class="white">01</text><text x="354" y="280" class="dim">tank</text><text x="384" y="280" class="magenta">cache</text><text x="420" y="280" class="dim">-</text><text x="456" y="280" class="green">●</text><text x="468" y="280" class="white">0</text><text x="504" y="280" class="white">0.0</text><text x="540" y="280" class="dim">0%</text><text x="606" y="280" class="header">│</text>
+    
+    <!-- Slot numbers -->
+    <text x="0" y="294" class="dim">││</text>
+    <text x="12" y="294" class="dim">│</text><text x="18" y="294" class="white">0</text><text x="24" y="294" class="dim">││</text><text x="30" y="294" class="white">0</text><text x="36" y="294" class="dim">││</text><text x="42" y="294" class="white">0</text><text x="48" y="294" class="dim">│</text><text x="54" y="294" class="white">0</text><text x="60" y="294" class="dim">││</text><text x="66" y="294" class="white">0</text>
+    <text x="324" y="294" class="dim">││</text><text x="336" y="294" class="white">02</text><text x="354" y="294" class="dim">tank</text><text x="384" y="294" class="magenta">cache</text><text x="420" y="294" class="dim">-</text><text x="456" y="294" class="green">●</text><text x="468" y="294" class="white">0</text><text x="504" y="294" class="white">0.0</text><text x="540" y="294" class="dim">0%</text><text x="606" y="294" class="header">│</text>
+    
+    <text x="0" y="308" class="dim">││</text>
+    <text x="12" y="308" class="dim">│</text><text x="18" y="308" class="white">1</text><text x="24" y="308" class="dim">││</text><text x="30" y="308" class="white">2</text><text x="36" y="308" class="dim">││</text><text x="42" y="308" class="white">3</text><text x="48" y="308" class="dim">│</text><text x="54" y="308" class="white">4</text><text x="60" y="308" class="dim">││</text><text x="66" y="308" class="white">5</text>
+    <text x="324" y="308" class="dim">││</text><text x="336" y="308" class="white">03</text><text x="354" y="308" class="dim">tank</text><text x="384" y="308" class="header">data</text><text x="420" y="308" class="dim">r1-0</text><text x="456" y="308" class="green">●</text><text x="468" y="308" class="white">0</text><text x="504" y="308" class="white">0.0</text><text x="540" y="308" class="dim">0%</text><text x="606" y="308" class="header">│</text>
+    
+    <!-- More drive stats -->
+    <text x="324" y="322" class="dim">││</text><text x="336" y="322" class="white">04</text><text x="354" y="322" class="dim">tank</text><text x="384" y="322" class="header">data</text><text x="420" y="322" class="dim">r1-0</text><text x="456" y="322" class="green">●</text><text x="468" y="322" class="white">4</text><text x="504" y="322" class="white">0.0</text><text x="540" y="322" class="green">5%</text><text x="564" y="322" class="header">█</text><text x="606" y="322" class="header">│</text>
+    <text x="324" y="336" class="dim">││</text><text x="336" y="336" class="white">05</text><text x="354" y="336" class="dim">tank</text><text x="384" y="336" class="header">data</text><text x="420" y="336" class="dim">r1-0</text><text x="456" y="336" class="green">●</text><text x="468" y="336" class="white">4</text><text x="504" y="336" class="white">0.0</text><text x="540" y="336" class="green">3%</text><text x="564" y="336" class="header">█▆</text><text x="606" y="336" class="header">│</text>
+    <text x="324" y="350" class="dim">││</text><text x="336" y="350" class="white">06</text><text x="354" y="350" class="dim">tank</text><text x="384" y="350" class="header">data</text><text x="420" y="350" class="dim">r1-0</text><text x="456" y="350" class="green">●</text><text x="468" y="350" class="white">0</text><text x="504" y="350" class="white">0.0</text><text x="540" y="350" class="dim">0%</text><text x="606" y="350" class="header">│</text>
+    
+    <!-- Legend and charts section -->
+    <text x="0" y="364" class="dim">│└─────────────────────────────────────────────────────────────────────┘│</text><text x="336" y="364" class="white">07</text><text x="354" y="364" class="dim">tank</text><text x="384" y="364" class="header">data</text><text x="420" y="364" class="dim">r1-1</text><text x="456" y="364" class="green">●</text><text x="468" y="364" class="white">0</text><text x="504" y="364" class="white">0.0</text><text x="540" y="364" class="dim">0%</text><text x="564" y="364" class="header">█</text><text x="606" y="364" class="header">│</text>
+    
+    <text x="0" y="378">│</text><text x="6" y="378" class="green">●</text><text x="18" y="378">Rd</text><text x="36" y="378" class="yellow">●</text><text x="48" y="378">Wr</text><text x="66" y="378" class="magenta">●</text><text x="78" y="378">R+W</text><text x="102" y="378" class="dim">○</text><text x="114" y="378">Idle</text>
+    <text x="324" y="378" class="dim">│</text><text x="336" y="378" class="white">08</text><text x="354" y="378" class="dim">tank</text><text x="384" y="378" class="header">data</text><text x="420" y="378" class="dim">r1-1</text><text x="456" y="378" class="green">●</text><text x="468" y="378" class="white">0</text><text x="504" y="378" class="white">0.0</text><text x="540" y="378" class="dim">0%</text><text x="564" y="378" class="header">█</text><text x="606" y="378" class="header">│</text>
+    
+    <text x="0" y="392">│</text><text x="6" y="392" class="white">IOPS: R:35 W:0 T:35</text>
+    <text x="324" y="392" class="dim">│</text><text x="336" y="392" class="white">09</text><text x="354" y="392" class="dim">tank</text><text x="384" y="392" class="header">data</text><text x="420" y="392" class="dim">r1-1</text><text x="456" y="392" class="green">●</text><text x="468" y="392" class="white">0</text><text x="504" y="392" class="white">0.0</text><text x="540" y="392" class="dim">0%</text><text x="564" y="392" class="header">█</text><text x="606" y="392" class="header">│</text>
+    
+    <text x="0" y="406">│</text><text x="6" y="406" class="header">⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣰⠤⠤⠤</text>
+    <text x="324" y="406" class="dim">│</text><text x="336" y="406" class="white">10</text><text x="354" y="406" class="dim">tank</text><text x="384" y="406" class="header">data</text><text x="420" y="406" class="dim">r1-1</text><text x="456" y="406" class="green">●</text><text x="468" y="406" class="white">4</text><text x="504" y="406" class="white">0.0</text><text x="540" y="406" class="green">4%</text><text x="564" y="406" class="header">▄█</text><text x="606" y="406" class="header">│</text>
+    
+    <text x="0" y="420">│</text><text x="6" y="420" class="white">MB/s: R:0.1 W:0.0 T:0.1</text>
+    <text x="324" y="420" class="dim">│</text><text x="336" y="420" class="white">11</text><text x="354" y="420" class="dim">tank</text><text x="384" y="420" class="header">data</text><text x="420" y="420" class="dim">r1-2</text><text x="456" y="420" class="green">●</text><text x="468" y="420" class="white">4</text><text x="504" y="420" class="white">0.0</text><text x="540" y="420" class="green">2%</text><text x="564" y="420" class="header">█▄</text><text x="606" y="420" class="header">│</text>
+    
+    <text x="0" y="434">│</text><text x="6" y="434" class="green">⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⠖⠒⠒</text>
+    <text x="324" y="434" class="dim">│</text><text x="336" y="434" class="white">12</text><text x="354" y="434" class="dim">tank</text><text x="384" y="434" class="header">data</text><text x="420" y="434" class="dim">r1-2</text><text x="456" y="434" class="green">●</text><text x="468" y="434" class="white">4</text><text x="504" y="434" class="white">0.0</text><text x="540" y="434" class="green">4%</text><text x="564" y="434" class="header">▅█</text><text x="606" y="434" class="header">│</text>
+    
+    <text x="0" y="448">│</text><text x="6" y="448" class="white">Latency(ms): R:7.7 W:0.0</text>
+    <text x="324" y="448" class="dim">│</text><text x="336" y="448" class="white">13</text><text x="354" y="448" class="dim">tank</text><text x="384" y="448" class="header">data</text><text x="420" y="448" class="dim">r1-2</text><text x="456" y="448" class="green">●</text><text x="468" y="448" class="white">4</text><text x="504" y="448" class="white">0.0</text><text x="540" y="448" class="green">2%</text><text x="564" y="448" class="header">██</text><text x="606" y="448" class="header">│</text>
+    
+    <text x="0" y="462">│</text><text x="6" y="462" class="yellow">⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣰⠤⠤⠤</text>
+    <text x="324" y="462" class="dim">│</text><text x="336" y="462" class="white">14</text><text x="354" y="462" class="dim">tank</text><text x="384" y="462" class="header">data</text><text x="420" y="462" class="dim">r1-2</text><text x="456" y="462" class="green">●</text><text x="468" y="462" class="white">4</text><text x="504" y="462" class="white">0.0</text><text x="540" y="462" class="green">2%</text><text x="564" y="462" class="header">█</text><text x="606" y="462" class="header">│</text>
+    
+    <text x="0" y="476">│</text><text x="6" y="476" class="white">Queue Depth: 0</text>
+    <text x="324" y="476" class="dim">│</text><text x="336" y="476" class="white">15</text><text x="354" y="476" class="dim">tank</text><text x="384" y="476" class="header">data</text><text x="420" y="476" class="dim">r1-3</text><text x="456" y="476" class="green">●</text><text x="468" y="476" class="white">0</text><text x="504" y="476" class="white">0.0</text><text x="540" y="476" class="dim">0%</text><text x="564" y="476" class="header">██</text><text x="606" y="476" class="header">│</text>
+    
+    <text x="0" y="490">│</text><text x="6" y="490" class="magenta">⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣀⣸⢸⣸</text>
+    <text x="312" y="490" class="magenta">⣇</text>
+    <text x="324" y="490" class="dim">│</text><text x="336" y="490" class="white">16</text><text x="354" y="490" class="dim">tank</text><text x="384" y="490" class="header">data</text><text x="420" y="490" class="dim">r1-3</text><text x="456" y="490" class="green">●</text><text x="468" y="490" class="white">4</text><text x="504" y="490" class="white">0.0</text><text x="540" y="490" class="green">2%</text><text x="564" y="490" class="header">█▂</text><text x="606" y="490" class="header">│</text>
+    
+    <!-- Footer -->
+    <text x="0" y="504" class="header">└────────────────────────────────────────────────────────────────────────────────────────────────────────┘</text>
+    <text x="0" y="532" class="header">[Q]</text><text x="24" y="532" class="dim">uit</text><text x="48" y="532" class="header">[R]</text><text x="72" y="532" class="dim">edraw</text><text x="120" y="532">│ 25 multipath, 26 standalone</text>
+  </g>
+</svg>

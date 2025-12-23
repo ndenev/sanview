@@ -2,7 +2,7 @@
 
 Real-time TUI for monitoring FreeBSD storage arrays.
 
-![screenshot](screenshot.svg)
+![sanview demo](sanview.svg)
 
 SANVIEW provides a visual front panel representation of a storage enclosure with real-time activity LEDs, alongside system metrics like CPU, memory, network, and virtualization status. Built specifically for FreeBSD systems using multipath storage with external SAS/SATA drive enclosures.
 

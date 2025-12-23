@@ -560,16 +560,23 @@ fn render_vertical_drive(frame: &mut Frame, area: Rect, slot: usize, devices: &[
             let ctrl_b_stats = dev.path_stats.iter().find(|p| p.controller == 1);
 
             // Helper to determine LED state for a controller's path
+            // Passive paths show crossed circle, active paths show activity-based LED
             let get_led = |path_stats: Option<&crate::domain::device::PathStats>| -> (Color, &str) {
                 match path_stats {
                     Some(ps) => {
-                        let has_read = ps.statistics.read_iops > 0.1;
-                        let has_write = ps.statistics.write_iops > 0.1;
-                        match (has_read, has_write) {
-                            (true, true) => (Color::Magenta, if blink { "●" } else { "○" }),
-                            (true, false) => (Color::Green, if blink { "●" } else { "○" }),
-                            (false, true) => (Color::Yellow, if blink { "●" } else { "○" }),
-                            (false, false) => (Color::DarkGray, "○"),
+                        if !ps.is_active {
+                            // Passive/standby path - show crossed circle in dark gray
+                            (Color::DarkGray, "⊘")
+                        } else {
+                            // Active path - show activity-based LED
+                            let has_read = ps.statistics.read_iops > 0.1;
+                            let has_write = ps.statistics.write_iops > 0.1;
+                            match (has_read, has_write) {
+                                (true, true) => (Color::Magenta, if blink { "●" } else { "○" }),
+                                (true, false) => (Color::Green, if blink { "●" } else { "○" }),
+                                (false, true) => (Color::Yellow, if blink { "●" } else { "○" }),
+                                (false, false) => (Color::DarkGray, "○"),
+                            }
                         }
                     }
                     None => (Color::DarkGray, "○"),

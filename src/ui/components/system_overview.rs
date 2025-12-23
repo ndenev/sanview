@@ -4,7 +4,7 @@ use ratatui::{
     style::{Color, Style},
     symbols::Marker,
     text::{Line, Span},
-    widgets::{Axis, Block, Borders, Chart, Dataset, Gauge, List, ListItem, Paragraph, Sparkline},
+    widgets::{Axis, Block, Borders, Chart, Dataset, List, ListItem, Paragraph},
     Frame,
 };
 use std::collections::VecDeque;
@@ -17,7 +17,8 @@ pub fn render_system_overview(
     network_stats: &[NetworkStats],
     vms: &[VmInfo],
     jails: &[JailInfo],
-    cpu_history: &[VecDeque<f64>],
+    _cpu_history: &[VecDeque<f64>],
+    cpu_aggregate_history: &VecDeque<f64>,
     memory_history: &VecDeque<f64>,
     _arc_size_history: &VecDeque<f64>,
     _arc_ratio_history: &VecDeque<f64>,
@@ -59,7 +60,7 @@ pub fn render_system_overview(
         ])
         .split(main_chunks[0]);
 
-    render_cpu_stats(frame, left_chunks[0], cpu_stats, cpu_history);
+    render_cpu_stats(frame, left_chunks[0], cpu_stats, cpu_aggregate_history);
     render_memory_stats(frame, left_chunks[1], memory_stats, memory_history);
     render_network_stats(frame, left_chunks[2], network_stats, network_history);
 
@@ -76,7 +77,7 @@ pub fn render_system_overview(
     render_jail_list(frame, right_chunks[1], jails);
 }
 
-fn render_cpu_stats(frame: &mut Frame, area: Rect, cpu_stats: &CpuStats, cpu_history: &[VecDeque<f64>]) {
+fn render_cpu_stats(frame: &mut Frame, area: Rect, cpu_stats: &CpuStats, cpu_aggregate_history: &VecDeque<f64>) {
     let block = Block::default()
         .title(format!(" CPU ({} cores) ", cpu_stats.cores.len()))
         .borders(Borders::ALL)
@@ -93,116 +94,140 @@ fn render_cpu_stats(frame: &mut Frame, area: Rect, cpu_stats: &CpuStats, cpu_his
         return;
     }
 
-    // Calculate how many cores we can fit - each row is 1 line tall
-    let cores_per_row = 4;
-    let rows_needed = (cpu_stats.cores.len() + cores_per_row - 1) / cores_per_row;
+    // Layout: compact core list on left, aggregate chart on right
+    // Each core needs ~10 chars: "● C15 100%" - we show 4 columns
+    const CORE_WIDTH: u16 = 10;
+    const CORES_PER_ROW: usize = 4;
+    let core_list_width = CORE_WIDTH * CORES_PER_ROW as u16;
 
-    // Each row is exactly 1 line
-    let row_constraints: Vec<Constraint> = (0..rows_needed)
-        .map(|_| Constraint::Length(1))
-        .collect();
+    let chart_width = if inner.width > core_list_width + 2 {
+        inner.width - core_list_width
+    } else {
+        0
+    };
 
-    let rows = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints(row_constraints)
-        .split(inner);
+    // Left side: compact core list
+    let list_area = Rect {
+        x: inner.x,
+        y: inner.y,
+        width: core_list_width.min(inner.width),
+        height: inner.height,
+    };
 
-    for (row_idx, row_area) in rows.iter().enumerate() {
-        let col_constraints: Vec<Constraint> = (0..cores_per_row)
-            .map(|_| Constraint::Percentage(100 / cores_per_row as u16))
-            .collect();
+    // Right side: aggregate CPU chart
+    let chart_area = Rect {
+        x: inner.x + core_list_width,
+        y: inner.y,
+        width: chart_width,
+        height: inner.height,
+    };
 
-        let cols = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints(col_constraints)
-            .split(*row_area);
+    // Render compact core list in column-major order
+    let rows_needed = (cpu_stats.cores.len() + CORES_PER_ROW - 1) / CORES_PER_ROW;
 
-        for (col_idx, col_area) in cols.iter().enumerate() {
-            // Column-major order: cores go down columns first, then wrap to next column
-            let core_idx = col_idx * rows_needed + row_idx;
-            if core_idx < cpu_stats.cores.len() {
-                let history = cpu_history.get(core_idx);
-                render_cpu_core(frame, *col_area, &cpu_stats.cores[core_idx], history);
-            }
-        }
-    }
-}
-
-fn render_cpu_core(frame: &mut Frame, area: Rect, core: &crate::collectors::CoreStats, history: Option<&VecDeque<f64>>) {
-    // Determine if core is busy (blinker)
+    // Blink state for activity indicators
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap();
     let blink = (now.as_millis() / 200) % 2 == 0;
 
-    let indicator = if core.total_pct > 5.0 {
-        if blink {
-            "●"
-        } else {
-            "○"
-        }
-    } else {
-        "○"
-    };
+    for row_idx in 0..rows_needed.min(inner.height as usize) {
+        let y_pos = list_area.y + row_idx as u16;
 
-    let color = if core.total_pct > 80.0 {
-        Color::Red
-    } else if core.total_pct > 50.0 {
-        Color::Yellow
-    } else if core.total_pct > 5.0 {
-        Color::Green
-    } else {
-        Color::DarkGray
-    };
-
-    // Single line layout: [indicator C## pct%] [sparkline]
-    // Label takes ~10 chars: "● C15 100%"
-    let label_width = 10u16;
-    let sparkline_width = area.width.saturating_sub(label_width + 1);
-
-    if sparkline_width >= 5 && history.is_some() {
-        // Split horizontally: label on left, sparkline on right
-        let chunks = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([
-                Constraint::Length(label_width),
-                Constraint::Min(5),
-            ])
-            .split(area);
-
-        // Render label
-        let label = Line::from(vec![
-            Span::styled(indicator, Style::default().fg(color)),
-            Span::raw(format!(" C{:<2} {:>3.0}%", core.core_id, core.total_pct)),
-        ]);
-        let paragraph = Paragraph::new(label);
-        frame.render_widget(paragraph, chunks[0]);
-
-        // Render sparkline
-        if let Some(hist) = history {
-            if !hist.is_empty() {
-                let width = chunks[1].width as usize;
-                let start = if hist.len() > width {
-                    hist.len() - width
-                } else {
-                    0
-                };
-                let data: Vec<u64> = hist.iter().skip(start).map(|&v| v as u64).collect();
-                let sparkline = Sparkline::default()
-                    .data(&data)
-                    .style(Style::default().fg(Color::Cyan))
-                    .bar_set(ratatui::symbols::bar::NINE_LEVELS);
-                frame.render_widget(sparkline, chunks[1]);
+        for col_idx in 0..CORES_PER_ROW {
+            // Column-major order: cores go down columns first
+            let core_idx = col_idx * rows_needed + row_idx;
+            if core_idx >= cpu_stats.cores.len() {
+                continue;
             }
+
+            let core = &cpu_stats.cores[core_idx];
+            let x_pos = list_area.x + (col_idx as u16 * CORE_WIDTH);
+
+            let core_area = Rect {
+                x: x_pos,
+                y: y_pos,
+                width: CORE_WIDTH,
+                height: 1,
+            };
+
+            // Determine indicator and color
+            let indicator = if core.total_pct > 5.0 {
+                if blink { "●" } else { "○" }
+            } else {
+                "○"
+            };
+
+            let color = if core.total_pct > 80.0 {
+                Color::Red
+            } else if core.total_pct > 50.0 {
+                Color::Yellow
+            } else if core.total_pct > 5.0 {
+                Color::Green
+            } else {
+                Color::DarkGray
+            };
+
+            let label = Line::from(vec![
+                Span::styled(format!("{} ", indicator), Style::default().fg(color)),
+                Span::styled(
+                    format!("C{:<2}{:>3.0}%", core.core_id, core.total_pct),
+                    Style::default().fg(Color::White),
+                ),
+            ]);
+            frame.render_widget(Paragraph::new(label), core_area);
         }
-    } else {
-        // Not enough width for sparkline, just show label
-        let label = Line::from(vec![
-            Span::styled(indicator, Style::default().fg(color)),
-            Span::raw(format!(" C{:<2} {:>3.0}%", core.core_id, core.total_pct)),
-        ]);
-        let paragraph = Paragraph::new(label);
-        frame.render_widget(paragraph, area);
+    }
+
+    // Render aggregate CPU chart on right side
+    if chart_width > 3 && inner.height > 1 && !cpu_aggregate_history.is_empty() {
+        // Fixed window size based on chart width (2 data points per character with Braille)
+        let window_size = (chart_width as usize) * 2;
+
+        // Take only the most recent window_size points
+        let start = if cpu_aggregate_history.len() > window_size {
+            cpu_aggregate_history.len() - window_size
+        } else {
+            0
+        };
+
+        // Convert to (x, y) points - always use 0..window_size for X to keep fixed scale
+        let data_points: Vec<(f64, f64)> = cpu_aggregate_history.iter()
+            .skip(start)
+            .enumerate()
+            .map(|(i, &v)| (i as f64, v))
+            .collect();
+
+        // Fixed X bounds - always use window_size so chart doesn't rescale
+        let x_max = window_size as f64;
+
+        // CPU is always 0-100%
+        let max_val = 100.0;
+
+        let datasets = vec![
+            Dataset::default()
+                .marker(Marker::Braille)
+                .style(Style::default().fg(Color::Cyan))
+                .data(&data_points),
+        ];
+
+        let chart = Chart::new(datasets)
+            .x_axis(
+                Axis::default()
+                    .bounds([0.0, x_max])
+                    .style(Style::default().fg(Color::DarkGray))
+            )
+            .y_axis(
+                Axis::default()
+                    .bounds([0.0, max_val])
+                    .labels(vec![
+                        Span::styled("0", Style::default().fg(Color::DarkGray)),
+                        Span::styled("100%", Style::default().fg(Color::DarkGray)),
+                    ])
+                    .style(Style::default().fg(Color::DarkGray))
+            );
+
+        frame.render_widget(chart, chart_area);
     }
 }
 
@@ -299,15 +324,15 @@ fn render_memory_stats(frame: &mut Frame, area: Rect, mem_stats: &MemoryStats, _
         let total_gb = mem_stats.total_bytes as f64 / 1024.0 / 1024.0 / 1024.0;
         let legend = Line::from(vec![
             Span::styled("█", Style::default().fg(Color::Red)),
-            Span::styled(format!("W:{} ", fmt_gb(wired_non_arc)), Style::default().fg(Color::DarkGray)),
+            Span::styled(format!("Wired:{} ", fmt_gb(wired_non_arc)), Style::default().fg(Color::DarkGray)),
             Span::styled("█", Style::default().fg(Color::Blue)),
             Span::styled(format!("ARC:{} ", fmt_gb(arc)), Style::default().fg(Color::DarkGray)),
             Span::styled("█", Style::default().fg(Color::Green)),
-            Span::styled(format!("A:{} ", fmt_gb(active)), Style::default().fg(Color::DarkGray)),
+            Span::styled(format!("Active:{} ", fmt_gb(active)), Style::default().fg(Color::DarkGray)),
             Span::styled("█", Style::default().fg(Color::Yellow)),
-            Span::styled(format!("I:{} ", fmt_gb(inactive)), Style::default().fg(Color::DarkGray)),
+            Span::styled(format!("Inactive:{} ", fmt_gb(inactive)), Style::default().fg(Color::DarkGray)),
             Span::styled("░", Style::default().fg(Color::DarkGray)),
-            Span::styled(format!("F:{} ", fmt_gb(free)), Style::default().fg(Color::DarkGray)),
+            Span::styled(format!("Free:{} ", fmt_gb(free)), Style::default().fg(Color::DarkGray)),
             Span::styled(format!("/{:.0}G", total_gb), Style::default().fg(Color::White)),
         ]);
 

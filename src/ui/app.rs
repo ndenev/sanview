@@ -118,6 +118,7 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, state: Arc<Mut
                 &current_state.vms,
                 &current_state.jails,
                 &current_state.cpu_history,
+                &current_state.cpu_aggregate_history,
                 &current_state.memory_history,
                 &current_state.arc_size_history,
                 &current_state.arc_ratio_history,

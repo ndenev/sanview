@@ -23,6 +23,7 @@ pub struct AppState {
 
     // Historical data for sparklines
     pub cpu_history: Vec<VecDeque<f64>>,  // Per-core history
+    pub cpu_aggregate_history: VecDeque<f64>,  // Aggregate CPU utilization %
     pub memory_history: VecDeque<f64>,     // Memory usage % history
     pub arc_size_history: VecDeque<f64>,   // ARC size in GB
     pub arc_ratio_history: VecDeque<f64>,  // Compression ratio
@@ -58,6 +59,7 @@ impl Default for AppState {
             should_quit: false,
             history_size: MIN_HISTORY_SIZE,
             cpu_history: Vec::new(),
+            cpu_aggregate_history: VecDeque::new(),
             memory_history: VecDeque::new(),
             arc_size_history: VecDeque::new(),
             arc_ratio_history: VecDeque::new(),
@@ -85,7 +87,7 @@ impl AppState {
     pub fn set_terminal_width(&mut self, width: u16) {
         let new_size = (width as usize * 2).max(MIN_HISTORY_SIZE); // *2 for braille resolution
 
-        // Pre-fill storage histories if they're empty (first call)
+        // Pre-fill histories if they're empty (first call) so charts scroll from start
         if self.storage_read_iops_history.is_empty() {
             self.storage_read_iops_history = VecDeque::from(vec![0.0; new_size]);
             self.storage_write_iops_history = VecDeque::from(vec![0.0; new_size]);
@@ -95,6 +97,11 @@ impl AppState {
             self.storage_write_latency_history = VecDeque::from(vec![0.0; new_size]);
             self.storage_queue_depth_history = VecDeque::from(vec![0.0; new_size]);
             self.storage_busy_history = VecDeque::from(vec![0.0; new_size]);
+        }
+
+        // Pre-fill CPU aggregate history
+        if self.cpu_aggregate_history.is_empty() {
+            self.cpu_aggregate_history = VecDeque::from(vec![0.0; new_size]);
         }
 
         self.history_size = new_size;
@@ -222,6 +229,15 @@ impl AppState {
                 Self::trim_history(history, history_size);
             }
         }
+
+        // Update aggregate CPU history (average of all cores)
+        let avg_cpu = if !cpu_stats.cores.is_empty() {
+            cpu_stats.cores.iter().map(|c| c.total_pct).sum::<f64>() / cpu_stats.cores.len() as f64
+        } else {
+            0.0
+        };
+        self.cpu_aggregate_history.push_back(avg_cpu);
+        Self::trim_history(&mut self.cpu_aggregate_history, history_size);
 
         // Update memory history
         self.memory_history.push_back(memory_stats.used_pct);

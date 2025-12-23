@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use std::ffi::CString;
 
 #[derive(Clone, Debug)]
@@ -93,11 +93,13 @@ impl CpuCollector {
     }
 
     fn read_cp_times(&self) -> Result<Vec<CpuTime>> {
-        // Read kern.cp_times sysctl directly (returns array of longs, 5 per CPU)
-        let name = CString::new("kern.cp_times").unwrap();
+        // kern.cp_times returns an array of longs (5 per CPU)
+        // The sysctl crate doesn't handle array types well, so we use direct syscall
+        let name = CString::new("kern.cp_times")?;
 
-        // First, get the size needed
-        let mut size: usize = 0;
+        // First call to get size
+        let mut size: libc::size_t = 0;
+        // SAFETY: sysctlbyname is a standard FreeBSD function, first call with null buffer
         let ret = unsafe {
             libc::sysctlbyname(
                 name.as_ptr(),
@@ -108,13 +110,12 @@ impl CpuCollector {
             )
         };
         if ret != 0 {
-            anyhow::bail!("Failed to get kern.cp_times size: {}", std::io::Error::last_os_error());
+            anyhow::bail!("sysctlbyname kern.cp_times size query failed");
         }
 
-        // Allocate buffer and read the data
-        let num_longs = size / std::mem::size_of::<libc::c_long>();
-        let mut buffer: Vec<libc::c_long> = vec![0; num_longs];
-
+        // Allocate buffer and get data
+        let mut buffer: Vec<u8> = vec![0; size];
+        // SAFETY: buffer is properly sized from previous call
         let ret = unsafe {
             libc::sysctlbyname(
                 name.as_ptr(),
@@ -125,19 +126,32 @@ impl CpuCollector {
             )
         };
         if ret != 0 {
-            anyhow::bail!("Failed to read kern.cp_times: {}", std::io::Error::last_os_error());
+            anyhow::bail!("sysctlbyname kern.cp_times data query failed");
+        }
+
+        // Each value is a c_long (8 bytes on 64-bit FreeBSD)
+        let long_size = std::mem::size_of::<libc::c_long>();
+        let num_longs = size / long_size;
+
+        let mut values: Vec<u64> = Vec::with_capacity(num_longs);
+        for i in 0..num_longs {
+            let offset = i * long_size;
+            let bytes = &buffer[offset..offset + long_size];
+            // Convert bytes to c_long (platform native endianness)
+            let value = libc::c_long::from_ne_bytes(bytes.try_into().unwrap());
+            values.push(value as u64);
         }
 
         // Parse: 5 values per CPU (user, nice, system, interrupt, idle)
         let mut cpu_times = Vec::new();
-        for chunk in buffer.chunks(5) {
+        for chunk in values.chunks(5) {
             if chunk.len() == 5 {
                 cpu_times.push(CpuTime {
-                    user: chunk[0] as u64,
-                    nice: chunk[1] as u64,
-                    system: chunk[2] as u64,
-                    interrupt: chunk[3] as u64,
-                    idle: chunk[4] as u64,
+                    user: chunk[0],
+                    nice: chunk[1],
+                    system: chunk[2],
+                    interrupt: chunk[3],
+                    idle: chunk[4],
                 });
             }
         }

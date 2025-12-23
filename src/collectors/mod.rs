@@ -1,5 +1,4 @@
 pub mod bhyve;
-pub mod cam;
 pub mod cpu;
 pub mod geom;
 pub mod jail;
@@ -10,7 +9,6 @@ pub mod ses;
 pub mod zfs;
 
 pub use bhyve::{BhyveCollector, VmInfo};
-pub use cam::CamCollector;
 pub use cpu::{CoreStats, CpuCollector, CpuStats};
 pub use geom::GeomCollector;
 pub use jail::{JailCollector, JailInfo};

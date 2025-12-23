@@ -90,6 +90,18 @@ pub struct NetworkCollector {
 /// This provides ~3-4 sample decay time (smooth but responsive)
 const EMA_ALPHA: f64 = 0.3;
 
+/// RAII guard for ifaddrs - ensures freeifaddrs is called on drop
+struct IfAddrsGuard(*mut libc::ifaddrs);
+
+impl Drop for IfAddrsGuard {
+    fn drop(&mut self) {
+        if !self.0.is_null() {
+            // SAFETY: We only create IfAddrsGuard with a valid pointer from getifaddrs
+            unsafe { libc::freeifaddrs(self.0) };
+        }
+    }
+}
+
 impl NetworkCollector {
     pub fn new() -> Self {
         Self {
@@ -198,59 +210,64 @@ impl NetworkCollector {
         // Skip interfaces we don't care about
         let skip_prefixes = ["lo", "pflog", "enc", "tap", "epair", "bridge", "gif", "stf"];
 
-        unsafe {
-            let mut ifap: *mut libc::ifaddrs = std::ptr::null_mut();
-            if libc::getifaddrs(&mut ifap) != 0 {
-                anyhow::bail!("getifaddrs failed");
-            }
+        // SAFETY: getifaddrs is a standard POSIX function
+        let mut ifap: *mut libc::ifaddrs = std::ptr::null_mut();
+        let ret = unsafe { libc::getifaddrs(&mut ifap) };
+        if ret != 0 {
+            anyhow::bail!("getifaddrs failed: {}", std::io::Error::last_os_error());
+        }
 
-            let mut ifa = ifap;
-            while !ifa.is_null() {
-                let ifaddrs = &*ifa;
+        // Use RAII guard to ensure freeifaddrs is called even on early return
+        let _guard = IfAddrsGuard(ifap);
 
-                // Get interface name
-                let name = CStr::from_ptr(ifaddrs.ifa_name).to_string_lossy().into_owned();
+        let mut ifa = ifap;
+        while !ifa.is_null() {
+            // SAFETY: We checked ifa is not null, and getifaddrs returns valid linked list
+            let ifaddrs = unsafe { &*ifa };
 
-                // Only process AF_LINK entries (which have the stats in ifa_data)
-                if !ifaddrs.ifa_addr.is_null() {
-                    let sa_family = (*ifaddrs.ifa_addr).sa_family as i32;
+            // SAFETY: ifa_name is guaranteed to be a valid C string by getifaddrs
+            let name = unsafe { CStr::from_ptr(ifaddrs.ifa_name) }
+                .to_string_lossy()
+                .into_owned();
 
-                    if sa_family == libc::AF_LINK && !ifaddrs.ifa_data.is_null() {
-                        // Skip unwanted interfaces
-                        if !skip_prefixes.iter().any(|p| name.starts_with(p)) {
-                            let if_data = ifaddrs.ifa_data as *const if_data;
-                            let data = &*if_data;
+            // Only process AF_LINK entries (which have the stats in ifa_data)
+            if !ifaddrs.ifa_addr.is_null() {
+                // SAFETY: We checked ifa_addr is not null
+                let sa_family = unsafe { (*ifaddrs.ifa_addr).sa_family } as i32;
 
-                            let is_aggregate = name.starts_with("lagg");
-                            let aggregate_members = self.lagg_members.get(&name).cloned().unwrap_or_default();
-                            let parent_aggregate = member_to_aggregate.get(&name).cloned();
+                if sa_family == libc::AF_LINK && !ifaddrs.ifa_data.is_null() {
+                    // Skip unwanted interfaces
+                    if !skip_prefixes.iter().any(|p| name.starts_with(p)) {
+                        // SAFETY: For AF_LINK addresses, ifa_data points to if_data struct
+                        let data = unsafe { &*(ifaddrs.ifa_data as *const if_data) };
 
-                            debug!("Network interface {}: rx={} tx={} link_state={} baudrate={}",
-                                   name, data.ifi_ibytes, data.ifi_obytes, data.ifi_link_state, data.ifi_baudrate);
+                        let is_aggregate = name.starts_with("lagg");
+                        let aggregate_members = self.lagg_members.get(&name).cloned().unwrap_or_default();
+                        let parent_aggregate = member_to_aggregate.get(&name).cloned();
 
-                            interfaces.insert(name.clone(), NetworkInterface {
-                                name,
-                                rx_bytes: data.ifi_ibytes,
-                                tx_bytes: data.ifi_obytes,
-                                rx_packets: data.ifi_ipackets,
-                                tx_packets: data.ifi_opackets,
-                                rx_errors: data.ifi_ierrors,
-                                tx_errors: data.ifi_oerrors,
-                                link_state: data.ifi_link_state,
-                                mtu: data.ifi_mtu,
-                                baudrate: data.ifi_baudrate,
-                                is_aggregate,
-                                aggregate_members,
-                                parent_aggregate,
-                            });
-                        }
+                        debug!("Network interface {}: rx={} tx={} link_state={} baudrate={}",
+                               name, data.ifi_ibytes, data.ifi_obytes, data.ifi_link_state, data.ifi_baudrate);
+
+                        interfaces.insert(name.clone(), NetworkInterface {
+                            name,
+                            rx_bytes: data.ifi_ibytes,
+                            tx_bytes: data.ifi_obytes,
+                            rx_packets: data.ifi_ipackets,
+                            tx_packets: data.ifi_opackets,
+                            rx_errors: data.ifi_ierrors,
+                            tx_errors: data.ifi_oerrors,
+                            link_state: data.ifi_link_state,
+                            mtu: data.ifi_mtu,
+                            baudrate: data.ifi_baudrate,
+                            is_aggregate,
+                            aggregate_members,
+                            parent_aggregate,
+                        });
                     }
                 }
-
-                ifa = ifaddrs.ifa_next;
             }
 
-            libc::freeifaddrs(ifap);
+            ifa = ifaddrs.ifa_next;
         }
 
         Ok(interfaces)

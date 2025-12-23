@@ -1,6 +1,8 @@
 use anyhow::Result;
 use libc::{c_int, c_void, size_t};
 use log::debug;
+use nix::unistd::sysconf;
+use nix::unistd::SysconfVar;
 use std::collections::HashMap;
 use std::mem;
 
@@ -9,11 +11,6 @@ const CTL_KERN: c_int = 1;
 const KERN_PROC: c_int = 14;
 const KERN_PROC_ALL: c_int = 0;
 const KERN_PROC_ARGS: c_int = 7;
-
-// Page size for converting rssize to bytes
-fn get_page_size() -> usize {
-    unsafe { libc::sysconf(libc::_SC_PAGESIZE) as usize }
-}
 
 // Fixed-point to float conversion for ki_pctcpu
 // FreeBSD uses FSCALE = 2048 for fixpt_t
@@ -39,9 +36,14 @@ pub struct BhyveCollector {
 
 impl BhyveCollector {
     pub fn new() -> Self {
-        Self {
-            page_size: get_page_size(),
-        }
+        // Use nix for safe sysconf access
+        let page_size = sysconf(SysconfVar::PAGE_SIZE)
+            .ok()
+            .flatten()
+            .map(|v| v as usize)
+            .unwrap_or(4096);
+
+        Self { page_size }
     }
 
     pub fn collect(&self) -> Result<Vec<VmInfo>> {
@@ -59,7 +61,8 @@ impl BhyveCollector {
         let mib: [c_int; 4] = [CTL_KERN, KERN_PROC, KERN_PROC_ARGS, pid];
         let mut size: size_t = 0;
 
-        // Get size
+        // SAFETY: sysctl is a standard FreeBSD system call
+        // First call with null buffer to get required size
         let ret = unsafe {
             libc::sysctl(
                 mib.as_ptr(),
@@ -75,6 +78,8 @@ impl BhyveCollector {
         }
 
         let mut buffer: Vec<u8> = vec![0; size];
+
+        // SAFETY: buffer is properly sized from previous sysctl call
         let ret = unsafe {
             libc::sysctl(
                 mib.as_ptr(),
@@ -100,6 +105,8 @@ impl BhyveCollector {
 
         // First call to get buffer size
         let mut size: size_t = 0;
+
+        // SAFETY: sysctl is a standard FreeBSD system call
         let ret = unsafe {
             libc::sysctl(
                 mib.as_ptr(),
@@ -115,14 +122,14 @@ impl BhyveCollector {
             anyhow::bail!("sysctl KERN_PROC_ALL size query failed");
         }
 
-        // Add some slack for new processes
+        // Add some slack for new processes that may appear between calls
         size = size * 5 / 4;
 
         // Allocate buffer
         let kinfo_size = mem::size_of::<KinfoProc>();
         let mut buffer: Vec<u8> = vec![0; size];
 
-        // Second call to get actual data
+        // SAFETY: buffer is properly allocated with extra slack
         let ret = unsafe {
             libc::sysctl(
                 mib.as_ptr(),
@@ -144,9 +151,17 @@ impl BhyveCollector {
         let num_procs = size / kinfo_size;
         for i in 0..num_procs {
             let offset = i * kinfo_size;
+
+            // SAFETY: We verify offset + kinfo_size <= buffer.len()
+            // The kinfo_proc struct layout must match FreeBSD's exactly
+            if offset + kinfo_size > buffer.len() {
+                break;
+            }
+
             let kinfo = unsafe { &*(buffer.as_ptr().add(offset) as *const KinfoProc) };
 
             // Extract command name
+            // SAFETY: ki_comm is a null-terminated C string within the struct
             let comm = unsafe {
                 std::ffi::CStr::from_ptr(kinfo.ki_comm.as_ptr())
                     .to_string_lossy()
@@ -222,8 +237,12 @@ struct VmStats {
     runtime_secs: f64,
 }
 
-// Minimal kinfo_proc structure with fields we need
-// Must match FreeBSD's struct layout exactly (1088 bytes)
+/// Minimal kinfo_proc structure with fields we need
+/// Must match FreeBSD's struct layout exactly
+///
+/// WARNING: This struct layout is FreeBSD version-specific.
+/// It was created for FreeBSD 14.x and may need updates for other versions.
+/// See sys/user.h for the authoritative definition.
 #[repr(C)]
 struct KinfoProc {
     ki_structsize: i32,

@@ -1,6 +1,5 @@
 use anyhow::{Context, Result};
-use std::ffi::CString;
-use std::mem::size_of;
+use sysctl::Sysctl;
 
 #[derive(Clone, Debug)]
 pub struct MemoryStats {
@@ -122,63 +121,24 @@ impl Default for MemoryCollector {
     }
 }
 
-/// Read a sysctl value as u64 using direct syscall (no process spawn)
+/// Read a sysctl value as u64 using the sysctl crate (safe)
 fn sysctl_u64(name: &str) -> Result<u64> {
-    let cname = CString::new(name).context("Invalid sysctl name")?;
+    let ctl = sysctl::Ctl::new(name)
+        .with_context(|| format!("Failed to access sysctl {}", name))?;
 
-    // First try as u64 (8 bytes)
-    let mut value: u64 = 0;
-    let mut len = size_of::<u64>();
+    let val = ctl.value()
+        .with_context(|| format!("Failed to read sysctl {}", name))?;
 
-    let ret = unsafe {
-        libc::sysctlbyname(
-            cname.as_ptr(),
-            &mut value as *mut u64 as *mut libc::c_void,
-            &mut len,
-            std::ptr::null(),
-            0,
-        )
-    };
-
-    if ret == 0 && len == size_of::<u64>() {
-        return Ok(value);
+    // Handle different sysctl value types
+    match val {
+        sysctl::CtlValue::U64(v) => Ok(v),
+        sysctl::CtlValue::S64(v) => Ok(v as u64),
+        sysctl::CtlValue::U32(v) => Ok(v as u64),
+        sysctl::CtlValue::S32(v) => Ok(v as u64),
+        sysctl::CtlValue::Int(v) => Ok(v as u64),
+        sysctl::CtlValue::Uint(v) => Ok(v as u64),
+        sysctl::CtlValue::Long(v) => Ok(v as u64),
+        sysctl::CtlValue::Ulong(v) => Ok(v as u64),
+        _ => anyhow::bail!("Unexpected sysctl type for {}: {:?}", name, val),
     }
-
-    // Try as u32 (some sysctls return 32-bit values)
-    let mut value32: u32 = 0;
-    let mut len32 = size_of::<u32>();
-
-    let ret = unsafe {
-        libc::sysctlbyname(
-            cname.as_ptr(),
-            &mut value32 as *mut u32 as *mut libc::c_void,
-            &mut len32,
-            std::ptr::null(),
-            0,
-        )
-    };
-
-    if ret == 0 && len32 == size_of::<u32>() {
-        return Ok(value32 as u64);
-    }
-
-    // Try as i32 for signed values
-    let mut valuei32: i32 = 0;
-    let mut leni32 = size_of::<i32>();
-
-    let ret = unsafe {
-        libc::sysctlbyname(
-            cname.as_ptr(),
-            &mut valuei32 as *mut i32 as *mut libc::c_void,
-            &mut leni32,
-            std::ptr::null(),
-            0,
-        )
-    };
-
-    if ret == 0 && leni32 == size_of::<i32>() {
-        return Ok(valuei32 as u64);
-    }
-
-    anyhow::bail!("Failed to read sysctl {}: errno {}", name, std::io::Error::last_os_error())
 }

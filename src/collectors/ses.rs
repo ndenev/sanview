@@ -6,7 +6,6 @@
 use anyhow::{Context, Result};
 use log::{debug, warn};
 use std::collections::HashMap;
-use std::ffi::CString;
 use std::fs::{self, File};
 use std::os::unix::io::AsRawFd;
 
@@ -14,8 +13,9 @@ use std::os::unix::io::AsRawFd;
 const ENCIOC: u8 = b's' - 0o40;  // ('s' - 040)
 
 // Define ioctl numbers using nix's _IO macro equivalent
+#[allow(non_snake_case)]
 const fn _IO(group: u8, num: u8) -> libc::c_ulong {
-    (0x20000000 | ((group as libc::c_ulong) << 8) | (num as libc::c_ulong))
+    0x20000000 | ((group as libc::c_ulong) << 8) | (num as libc::c_ulong)
 }
 
 const ENCIOC_GETNELM: libc::c_ulong = _IO(ENCIOC, 1);

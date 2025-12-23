@@ -93,13 +93,14 @@ impl CpuCollector {
     }
 
     fn read_cp_times(&self) -> Result<Vec<CpuTime>> {
-        // kern.cp_times returns an array of longs (5 per CPU)
-        // The sysctl crate doesn't handle array types well, so we use direct syscall
+        // kern.cp_times returns an array of c_long values (5 per CPU core)
+        // The sysctl crate cannot handle array-type sysctls (see github.com/johalun/sysctl-rs/issues/26)
+        // so we use direct sysctlbyname calls here
         let name = CString::new("kern.cp_times")?;
 
-        // First call to get size
+        // First call to get required buffer size
         let mut size: libc::size_t = 0;
-        // SAFETY: sysctlbyname is a standard FreeBSD function, first call with null buffer
+        // SAFETY: sysctlbyname with null buffer is safe and returns required size
         let ret = unsafe {
             libc::sysctlbyname(
                 name.as_ptr(),
@@ -113,9 +114,9 @@ impl CpuCollector {
             anyhow::bail!("sysctlbyname kern.cp_times size query failed");
         }
 
-        // Allocate buffer and get data
+        // Allocate buffer and retrieve data
         let mut buffer: Vec<u8> = vec![0; size];
-        // SAFETY: buffer is properly sized from previous call
+        // SAFETY: buffer is correctly sized from previous sysctlbyname call
         let ret = unsafe {
             libc::sysctlbyname(
                 name.as_ptr(),
@@ -129,7 +130,7 @@ impl CpuCollector {
             anyhow::bail!("sysctlbyname kern.cp_times data query failed");
         }
 
-        // Each value is a c_long (8 bytes on 64-bit FreeBSD)
+        // Parse the raw bytes as c_long array (8 bytes each on 64-bit FreeBSD)
         let long_size = std::mem::size_of::<libc::c_long>();
         let num_longs = size / long_size;
 
@@ -137,12 +138,11 @@ impl CpuCollector {
         for i in 0..num_longs {
             let offset = i * long_size;
             let bytes = &buffer[offset..offset + long_size];
-            // Convert bytes to c_long (platform native endianness)
             let value = libc::c_long::from_ne_bytes(bytes.try_into().unwrap());
             values.push(value as u64);
         }
 
-        // Parse: 5 values per CPU (user, nice, system, interrupt, idle)
+        // Group into CPU times: 5 values per core (user, nice, system, interrupt, idle)
         let mut cpu_times = Vec::new();
         for chunk in values.chunks(5) {
             if chunk.len() == 5 {
